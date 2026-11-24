@@ -1,17 +1,24 @@
-name: Release
+name: Build & Release
 
-# Push a tag like v1.0.0 to build executables for every platform and publish a GitHub release
-# whose notes come from that version's section in CHANGELOG.md.
+# Builds standalone apps (Python and Tk are bundled inside - nothing for the end user to install)
+# for Windows, macOS (Apple Silicon + Intel) and Linux (x64 + arm64).
+#
+#  * Push a tag like v1.0.0  -> build, self-test every app, then publish a GitHub release whose
+#                               notes are that version's section of CHANGELOG.md.
+#  * Run manually (Actions tab -> Build & Release -> Run workflow) -> build and self-test only,
+#                               downloadable from the run's "Artifacts". Nothing is published.
 on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   check:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,54 +29,89 @@ jobs:
         run: python scripts/release_notes.py --check "${GITHUB_REF_NAME}"
 
   build:
-    needs: check
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            name: Windows
-            asset: ProfitCalculator-Windows.exe
-          - os: macos-latest
-            name: macOS
-            asset: ProfitCalculator-macOS.zip
-          - os: ubuntu-latest
-            name: Linux
-            asset: ProfitCalculator-Linux
+          - { name: Windows x64,        os: windows-latest,   asset: ProfitCalculator-Windows-x64.exe }
+          - { name: macOS Apple Silicon, os: macos-latest,     asset: ProfitCalculator-macOS-AppleSilicon.zip }
+          - { name: macOS Intel,         os: macos-15-intel,   asset: ProfitCalculator-macOS-Intel.zip }
+          # Linux is built on the oldest runner so it also runs on older distributions.
+          - { name: Linux x64,           os: ubuntu-22.04,     asset: ProfitCalculator-Linux-x64.tar.gz }
+          - { name: Linux arm64,         os: ubuntu-22.04-arm, asset: ProfitCalculator-Linux-arm64.tar.gz }
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------- Windows
       - uses: actions/setup-python@v5
+        if: runner.os == 'Windows'
         with:
           python-version: "3.12"
-      - name: Install Tk (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y python3-tk tk-dev
-      - name: Install PyInstaller
-        run: python -m pip install pyinstaller
       - name: Build (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
+          python -m pip install "pyinstaller>=6.10,<7"
           pyinstaller --onefile --windowed --name ProfitCalculator profit_calculator.py
           Move-Item dist/ProfitCalculator.exe "${{ matrix.asset }}"
+      - name: Self-test the built app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ".\${{ matrix.asset }}" -ArgumentList "--selftest","selftest-result.txt" -Wait -PassThru
+          Get-Content selftest-result.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      # ------------------------------------------------------------------ macOS
+      - uses: actions/setup-python@v5
+        if: runner.os == 'macOS'
+        with:
+          python-version: "3.12"
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
+          python -m pip install "pyinstaller>=6.10,<7"
           pyinstaller --windowed --name ProfitCalculator profit_calculator.py
+          codesign --force --deep --sign - dist/ProfitCalculator.app
+          codesign --verify --deep --strict dist/ProfitCalculator.app
           ditto -c -k --sequesterRsrc --keepParent dist/ProfitCalculator.app "${{ matrix.asset }}"
+      - name: Self-test the built app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf selftest && mkdir selftest && ditto -x -k "${{ matrix.asset }}" selftest
+          selftest/ProfitCalculator.app/Contents/MacOS/ProfitCalculator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
+          cat selftest-result.txt
+
+      # ------------------------------------------------------------------ Linux
+      # Uses the distribution's own Python + Tk; PyInstaller copies both into the app.
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk python3-venv binutils xvfb
+          python3 -m venv --system-site-packages .venv
+          . .venv/bin/activate
+          pip install "pyinstaller>=6.10,<7"
           pyinstaller --onefile --name ProfitCalculator profit_calculator.py
-          mv dist/ProfitCalculator "${{ matrix.asset }}"
-          chmod +x "${{ matrix.asset }}"
+          tar -czf "${{ matrix.asset }}" -C dist ProfitCalculator
+      - name: Self-test the built app (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          rm -rf selftest && mkdir selftest && tar -xzf "${{ matrix.asset }}" -C selftest
+          xvfb-run -a selftest/ProfitCalculator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
+          cat selftest-result.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
+          if-no-files-found: error
 
   release:
-    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [check, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,6 +124,8 @@ jobs:
           merge-multiple: true
       - name: Extract release notes from CHANGELOG.md
         run: python scripts/release_notes.py "${GITHUB_REF_NAME}" > release_notes.md
+      - name: Checksums
+        run: cd assets && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

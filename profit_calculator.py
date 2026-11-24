@@ -157,7 +157,12 @@ def sanitize_item(d):
     return out
 
 
+_DATA_FILE_OVERRIDE = None   # set by selftest() only
+
+
 def data_file():
+    if _DATA_FILE_OVERRIDE:
+        return _DATA_FILE_OVERRIDE
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
     elif sys.platform == "darwin":
@@ -842,10 +847,80 @@ class App:
         self.root.destroy()
 
 
+def selftest(out_path):
+    """Start the real GUI, drive it through the main features, then exit.
+
+    Used by the release build to prove the packaged executable can start Tk and calculate.
+    Writes "OK" or a traceback to out_path and returns the process exit code.
+    Never touches the user's saved entries.
+    """
+    import tempfile
+    import traceback
+    global _DATA_FILE_OVERRIDE
+    _DATA_FILE_OVERRIDE = os.path.join(tempfile.mkdtemp(), "entries.json")
+    msg, code, root = "OK", 0, None
+    try:
+        root = tk.Tk()
+        app = App(root)
+        assert len(app.cards) == 1, "should start with exactly one item"
+        for _ in range(MAX_ITEMS - 1):
+            app.add_card()
+        assert len(app.cards) == MAX_ITEMS, "should allow up to 5 items"
+        assert not app.add_btn.instate(["!disabled"]), "add button should disable at 5 items"
+
+        c = app.cards[0]
+        c.base.set("1,000,000")
+        c.scrolls.set("3")
+        c.sprice.set("200k")
+        c.add_material()
+        c.mats[0][0].set("50k")
+        c.mats[0][1].set("4")
+        c.sale.set("2m")
+        root.update()
+        assert c.total.get() == "1,800,000", "total cost was " + c.total.get()
+        assert c.target.get() == "140,000", "profit was " + c.target.get()
+
+        c.mode.set("profit")
+        c.target.set("100k")
+        root.update()
+        assert c.sale.get() == "1,958,763", "sale price was " + c.sale.get()
+        app.commit_now()
+
+        app.undo()
+        app.redo()
+        c = app.cards[0]
+        assert c.target.get() == "100k" and c.sale.get() == "1,958,763", "undo/redo lost state"
+
+        app.remove_card(app.cards[-1])
+        assert len(app.cards) == MAX_ITEMS - 1, "remove item failed"
+        assert app.save() and os.path.exists(data_file()), "save failed"
+        root.update()
+    except BaseException:
+        msg, code = traceback.format_exc(), 1
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(msg)
+    except OSError:
+        pass
+    if code:
+        sys.stderr.write(msg)
+    return code
+
+
 def main():
     if any(a in ("--version", "-V") for a in sys.argv[1:]):
         print(f"{APP_NAME} {__version__}")
         return
+    if "--selftest" in sys.argv[1:]:
+        i = sys.argv.index("--selftest")
+        out = sys.argv[i + 1] if i + 1 < len(sys.argv) else "selftest-result.txt"
+        sys.exit(selftest(out))
     if sys.platform.startswith("win"):
         try:
             import ctypes

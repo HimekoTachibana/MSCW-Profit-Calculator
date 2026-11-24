@@ -33,8 +33,12 @@ First release.
   unsaved changes asks whether to save.
 - Runs on Windows, macOS and Linux (including CachyOS) using only Python's built-in Tkinter.
 - Version number shown in the window title, and `--version` command-line flag.
-- GitHub Actions workflow that builds Windows, macOS and Linux executables and publishes a
-  release, using this changelog as the release notes.
+- Standalone downloads that need **no installs** (Python and Tk are bundled inside):
+  Windows x64 (`.exe`), macOS Apple Silicon and Intel (`.zip`), Linux x64 and arm64 (`.tar.gz`).
+- GitHub Actions workflow ("Build & Release") that builds every app, starts each built app and
+  runs a built-in self-test (`--selftest`) before publishing, and uses this changelog as the
+  release notes. It can also be run manually from the Actions tab to build without releasing.
+- `SHA256SUMS.txt` checksums attached to every release.
 
 [Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/releases/tag/v1.0.0
