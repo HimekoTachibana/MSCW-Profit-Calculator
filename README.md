@@ -1,8 +1,18 @@
 # MSCW Profit Calculator
 
-Quickly work out profit when buying, crafting and selling items. Compare up to 5 items at once,
-include scroll and material costs, apply 3% or 5% tax, and either enter a sale price to see your
-profit or enter the profit you want to see the price to list at.
+Quickly work out profit when buying, crafting and selling items. Compare up to 10 items at once,
+include scroll and material costs, apply 3% or 5% tax, and type in a sale price, a profit or a
+profit % - the other two are worked out for you. A picture under the results shows how good the
+profit is:
+
+| Profit % (of total cost) | Picture |
+| --- | --- |
+| over 25% | gold bag |
+| over 20% | bag of gold |
+| over 10% | band of money |
+| over 5% | gold coin |
+| over 0% | copper coin |
+| loss | grave |
 
 Current version: see [CHANGELOG.md](CHANGELOG.md).
 
@@ -25,7 +35,7 @@ Linux builds need a normal desktop session (X11 or Wayland) and a reasonably rec
 
 ## Run from source
 
-Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (no other packages).
+Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (no other packages). Keep `profit_calculator.py` and `icons_data.py` together.
 
 | System | Setup | Run |
 | --- | --- | --- |
@@ -38,6 +48,8 @@ Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (n
 ## Tips
 
 - Numbers accept commas and shorthand: `500k`, `1.5m`, `2b`.
+- Reorder items with the ◀ ▶ buttons, or drag an item's title onto another item.
+- Resize the window and the whole app scales to fit; it also resizes itself as you add or remove items.
 - Undo / Redo: Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on macOS). Save: Ctrl+S / Cmd+S.
 - Saved entries load automatically on the next launch.
 

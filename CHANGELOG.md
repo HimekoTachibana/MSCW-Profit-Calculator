@@ -9,6 +9,30 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-24
+
+### Added
+- Up to **10** items at once (was 5).
+- **Profit %** pricing: next to "Sale price" and "Profit" you can now type the profit percentage
+  you want (of your total cost, e.g. `20` or `20%`); the sale price to list at and the profit are
+  worked out for you.
+- A picture under each item's results shows how good the profit is (profit % = profit / total cost):
+  gold bag over 25%, bag of gold over 20%, band of money over 10%, gold coin over 5%, copper coin
+  over 0%, and a grave for a loss. All pictures are the same size.
+- The purple leprechaun is now the app icon (Windows `.exe`, macOS app) and the window icon.
+- Reorder items with the ◀ ▶ buttons or by dragging an item's title onto another item. Undo and
+  redo remember the order.
+- The whole app scales with the window: resize it by hand and the text, buttons and pictures grow
+  or shrink, and the items rearrange into as many columns as fit.
+- The window now resizes itself when items or materials are added or removed. Its top-left corner
+  stays where it is.
+
+### Changed
+- Return on cost is shown with two decimals.
+- The release workflow downloads build files into `release-files/` so they cannot mix with the
+  repository's `assets/` folder.
+
+
 ## [1.0.0] - 2026-11-23
 
 First release.
@@ -41,5 +65,6 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/releases/tag/v1.0.0

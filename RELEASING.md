@@ -32,6 +32,11 @@ a `SHA256SUMS.txt` is attached. If any check, build or self-test fails, nothing 
 Run the same workflow with **Publish a GitHub release** left unticked. The apps appear under that
 run's **Artifacts**, and no tag or release is created.
 
+## Changing the pictures
+
+The pictures live in `assets/source/`. After replacing one, run `python scripts/make_icons.py`
+(needs `pip install pillow`) and commit the regenerated `assets/` and `icons_data.py`.
+
 ## If something goes wrong
 
 - *"Tag v1.1.0 already exists"*: bump `__version__` and add a new changelog entry, then run again.

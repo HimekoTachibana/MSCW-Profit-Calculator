@@ -4,4 +4,4 @@ build/
 dist/
 *.spec
 release_notes.md
-assets/
+release-files/

@@ -3,7 +3,7 @@
 Profit Calculator
 =================
 Quickly work out profit when buying, crafting and selling items.
-Starts with one item; add up to 5 side by side.
+Starts with one item; add up to 10.
 
 Runs on Windows, macOS and Linux (CachyOS/Arch) using only Python's
 built-in Tkinter - nothing to pip install.
@@ -21,8 +21,11 @@ CachyOS : sudo pacman -S python tk
 Tips
 ----
 * Numbers accept commas and shorthand: 500k = 500,000, 1.5m = 1,500,000, 2b = 2,000,000,000.
-* Pick which side of the sale you control: type the sale price and see the profit,
-  or type the profit you want and see the sale price you need to list at.
+* Pick what you want to type: the sale price (see the profit), the profit you want, or the
+  profit % you want - the other two are worked out for you.
+* The picture under the results shows how good the profit is (return on cost).
+* Reorder items with the < > buttons or by dragging an item's title onto another item.
+* Resize the window and the whole app scales to fit it.
 * Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on Mac) undo and redo, Ctrl+S (Cmd+S) saves.
 * Saved entries are loaded automatically next time the app starts.
 """
@@ -37,15 +40,26 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
-__version__ = "1.0.0"   # single source of truth - keep in sync with CHANGELOG.md
+try:  # the embedded pictures are optional - the app still works without them
+    import icons_data
+except Exception:  # pragma: no cover
+    icons_data = None
+ICON_PX = getattr(icons_data, "ICON_SIZE", 96)
+
+__version__ = "1.1.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
-MAX_ITEMS = 5
+MAX_ITEMS = 10
 MAX_MATERIALS = 5
 TAX_CHOICES = ("3%", "5%")
 BASE_CARD_W = 340
 HISTORY_LIMIT = 300
 COMMIT_DELAY_MS = 450
+ZOOM_MIN = 0.6          # smallest the whole UI shrinks to when the window is made small
+ZOOM_MAX = 2.4          # largest it grows to when the window is made big
+# whole-number ratios used to scale the (pixel-art) pictures: zoom(a) then subsample(b)
+IMAGE_RATIOS = [(1, 2), (3, 5), (2, 3), (3, 4), (4, 5), (1, 1), (5, 4), (4, 3), (3, 2),
+                (5, 3), (7, 4), (2, 1), (9, 4), (5, 2)]
 MAX_VALUE = 1e15
 
 BG_OK = "#ffffff"
@@ -63,9 +77,10 @@ DEFAULT_STATE = {
     "scroll_price": "",
     "materials": [],          # list of {"cost": str, "qty": str}
     "tax": "3%",
-    "mode": "price",          # "price" = you enter sale price, "profit" = you enter target profit
+    "mode": "price",          # what you type: "price" (sale price), "profit" or "percent" (profit %)
     "sale_price": "",
     "target_profit": "",
+    "target_pct": "",
 }
 
 
@@ -76,8 +91,8 @@ _SUFFIX = {"k": 1e3, "m": 1e6, "b": 1e9}
 
 
 def parse_num(text, allow_negative=False):
-    """Blank -> 0.0, invalid -> None. Understands commas and k / m / b suffixes."""
-    t = str(text).strip().replace(",", "").replace(" ", "").replace("_", "")
+    """Blank -> 0.0, invalid -> None. Understands commas, k / m / b suffixes and a trailing %."""
+    t = str(text).strip().replace(",", "").replace(" ", "").replace("_", "").rstrip("%")
     if not t:
         return 0.0
     mult = 1.0
@@ -119,9 +134,13 @@ def compute(d):
     cost = base + scroll_total + mat_total
     rate = 0.05 if d.get("tax") == "5%" else 0.03
 
-    if d.get("mode") == "profit":
+    mode = d.get("mode")
+    if mode == "profit":
         # sale * (1 - rate) - cost = target  ->  round UP so the target is always met
         sale = max(0, math.ceil((cost + num("target_profit")) / (1 - rate) - 1e-9))
+    elif mode == "percent":
+        # profit % is measured against the total cost: profit = cost * pct / 100
+        sale = max(0, math.ceil(cost * (1 + num("target_pct") / 100.0) / (1 - rate) - 1e-9))
     else:
         sale = num("sale_price")
 
@@ -134,17 +153,45 @@ def compute(d):
             "profit": profit, "roi": roi}
 
 
+# Reward picture for each profit level. "Profit %" = profit / total cost. Checked from the top,
+# a tier applies when the profit % is MORE than its floor (compared at 2 decimals).
+TIERS = [
+    # floor, picture,       title,          panel colour, text colour
+    (25.0, "gold_bag",    "Jackpot!",      "#fff3bf", "#7a5c00"),
+    (20.0, "money_bag",   "Great profit",  "#e8f4dc", "#2c6a1c"),
+    (10.0, "cash_stack",  "Good profit",   "#dff2f6", "#14606f"),
+    (5.0,  "gold_coin",   "Decent profit", "#fff0c2", "#80590a"),
+    (0.0,  "copper_coin", "Small profit",  "#fae5d3", "#80441a"),
+]
+LOSS_TIER = ("grave", "Loss", "#e9e9ef", "#4b5563")
+BREAKEVEN_TIER = (None, "Break-even", "#f1f2f4", "#4b5563")
+NEUTRAL_TIER = (None, "Waiting for numbers", "#f1f2f4", "#6b7280")
+
+
+def tier_for(roi):
+    """(picture, title, panel colour, text colour) for a profit % (None = nothing to judge yet)."""
+    if roi is None:
+        return NEUTRAL_TIER
+    r = round(roi, 2)
+    if r < 0:
+        return LOSS_TIER
+    for floor, key, title, bg, fg in TIERS:
+        if r > floor:
+            return (key, title, bg, fg)
+    return BREAKEVEN_TIER
+
+
 def sanitize_item(d):
     """Make an item dict from untrusted data (e.g. a hand-edited save file)."""
     out = copy.deepcopy(DEFAULT_STATE)
     if not isinstance(d, dict):
         return out
-    for k in ("nickname", "base", "scrolls", "scroll_price", "sale_price", "target_profit"):
+    for k in ("nickname", "base", "scrolls", "scroll_price", "sale_price", "target_profit", "target_pct"):
         if isinstance(d.get(k), str):
             out[k] = d[k]
     if d.get("tax") in TAX_CHOICES:
         out["tax"] = d["tax"]
-    if d.get("mode") in ("price", "profit"):
+    if d.get("mode") in ("price", "profit", "percent"):
         out["mode"] = d["mode"]
     mats = []
     if isinstance(d.get("materials"), list):
@@ -198,10 +245,12 @@ class Card(ttk.Frame):
 
         V = tk.StringVar
         self.nick, self.base, self.scrolls, self.sprice = V(), V(), V(), V()
-        self.sale, self.target, self.total = V(), V(), V()
+        self.sale, self.target, self.pct, self.total = V(), V(), V(), V()
+        self.tier_key = None
+        self._drag_target = None
         self.tax, self.mode = V(value="3%"), V(value="price")
         for v in (self.nick, self.base, self.scrolls, self.sprice,
-                  self.sale, self.target, self.tax, self.mode):
+                  self.sale, self.target, self.pct, self.tax, self.mode):
             v.trace_add("write", self._on_var)
 
         self._build()
@@ -232,10 +281,21 @@ class Card(ttk.Frame):
         head.columnconfigure(0, weight=1)
         self.title_lbl = ttk.Label(head, text="", font=app.f_title)
         self.title_lbl.grid(row=0, column=0, sticky="w")
-        ttk.Button(head, text="Clear", width=7, command=self.clear).grid(row=0, column=1, padx=(6, 0))
+        self.title_lbl.config(cursor="fleur")
+        for w in (self.title_lbl, head):
+            w.bind("<ButtonPress-1>", self._drag_start)
+            w.bind("<B1-Motion>", self._drag_move)
+            w.bind("<ButtonRelease-1>", self._drag_end)
+        self.left_btn = ttk.Button(head, text="\u25C0", width=3,
+                                   command=lambda: self.app.move_card(self, self.index - 1))
+        self.left_btn.grid(row=0, column=1, padx=(6, 0))
+        self.right_btn = ttk.Button(head, text="\u25B6", width=3,
+                                    command=lambda: self.app.move_card(self, self.index + 1))
+        self.right_btn.grid(row=0, column=2, padx=(2, 0))
+        ttk.Button(head, text="Clear", width=7, command=self.clear).grid(row=0, column=3, padx=(8, 0))
         self.remove_btn = ttk.Button(head, text="Remove", width=8,
                                      command=lambda: self.app.remove_card(self))
-        self.remove_btn.grid(row=0, column=2, padx=(4, 0))
+        self.remove_btn.grid(row=0, column=4, padx=(4, 0))
 
         body = ttk.Frame(self)
         body.grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -301,14 +361,16 @@ class Card(ttk.Frame):
         for t in TAX_CHOICES:
             ttk.Radiobutton(tax_f, text=t, value=t, variable=self.tax).pack(side="left", padx=(8, 0))
         r += 1
-        ttk.Label(body, text="I want to set:").grid(row=r, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(body, text="I want to type in:").grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        r += 1
         mode_f = ttk.Frame(body)
-        mode_f.grid(row=r, column=1, sticky="e", pady=(4, 0))
-        ttk.Radiobutton(mode_f, text="Sale price", value="price", variable=self.mode).pack(side="left")
-        ttk.Radiobutton(mode_f, text="Profit", value="profit", variable=self.mode).pack(side="left", padx=(8, 0))
+        mode_f.grid(row=r, column=0, columnspan=2, sticky="w")
+        for text, value in (("Sale price", "price"), ("Profit", "profit"), ("Profit %", "percent")):
+            ttk.Radiobutton(mode_f, text=text, value=value, variable=self.mode).pack(side="left", padx=(0, 10))
         r += 1
         self.sale_lbl, self.sale_entry = field("Preferred sale price", self.sale, "cost")
         self.target_lbl, self.target_entry = field("Preferred profit", self.target, "signed")
+        self.pct_lbl, self.pct_entry = field("Preferred profit %", self.pct, "signed")
         sep()
 
         section("Results")
@@ -316,6 +378,16 @@ class Card(ttk.Frame):
         self.net_lbl = result("You receive after tax")
         self.profit_lbl = result("Profit", big=True)
         self.roi_lbl = result("Return on cost")
+
+        self.reward = tk.Frame(body, highlightthickness=1, highlightbackground="#c8ccd0")
+        self.reward.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        r += 1
+        self.reward_icon = tk.Label(self.reward, bd=0, image=app.blank_icon)
+        self.reward_icon.pack(pady=(12, 4))
+        self.reward_title = tk.Label(self.reward, text="", font=app.f_title)
+        self.reward_title.pack()
+        self.reward_sub = tk.Label(self.reward, text="", wraplength=int(260 * app.scale))
+        self.reward_sub.pack(pady=(0, 12))
 
     def _rebuild_mats(self, focus_last=False):
         f = self.mat_frame
@@ -358,6 +430,7 @@ class Card(ttk.Frame):
             "mode": self.mode.get(),
             "sale_price": self.sale.get(),
             "target_profit": self.target.get(),
+            "target_pct": self.pct.get(),
         }
 
     def load_state(self, d):
@@ -370,6 +443,7 @@ class Card(ttk.Frame):
             self.sprice.set(d["scroll_price"])
             self.sale.set(d["sale_price"])
             self.target.set(d["target_profit"])
+            self.pct.set(d["target_pct"])
             self.tax.set(d["tax"])
             self.mode.set(d["mode"])
             self.mats = []
@@ -385,24 +459,73 @@ class Card(ttk.Frame):
             return True
         if any(c.get().strip() for c, _ in self.mats):
             return True
-        return bool((self.target if self.mode.get() == "profit" else self.sale).get().strip())
+        typed = {"profit": self.target, "percent": self.pct}.get(self.mode.get(), self.sale)
+        return bool(typed.get().strip())
 
     def display_name(self):
         return self.nick.get().strip() or f"Item {self.index + 1}"
 
-    def set_index(self, i, removable):
+    def set_index(self, i, removable, total=1):
         self.index = i
         if removable:
             self.remove_btn.grid()
         else:
             self.remove_btn.grid_remove()
+        if total > 1:
+            self.left_btn.grid()
+            self.right_btn.grid()
+            self.left_btn.state(["disabled" if i == 0 else "!disabled"])
+            self.right_btn.state(["disabled" if i >= total - 1 else "!disabled"])
+        else:
+            self.left_btn.grid_remove()
+            self.right_btn.grid_remove()
         self._update_title()
+
+    # ---- drag to reorder -------------------------------------------------- #
+    def _drag_start(self, event):
+        self._drag_target = None
+        self.configure(relief="raised")
+
+    def _drag_move(self, event):
+        target = self.app.nearest_card(event.x_root, event.y_root)
+        if target is not self._drag_target:
+            if self._drag_target is not None:
+                self._drag_target.configure(relief="groove")
+            self._drag_target = target if target is not self else None
+            if self._drag_target is not None:
+                self._drag_target.configure(relief="solid")
+
+    def _drag_end(self, event):
+        target = self.app.nearest_card(event.x_root, event.y_root)
+        for c in self.app.cards:
+            c.configure(relief="groove")
+        self._drag_target = None
+        if target is not None and target is not self:
+            self.app.move_card(self, target.index)
+
+    def on_zoom(self):
+        """Called when the whole UI is scaled: refresh the things that don't scale by themselves."""
+        z = self.app.zoom
+        self.breakdown.config(wraplength=int(300 * self.app.scale * z))
+        self.reward_sub.config(wraplength=int(260 * self.app.scale * z))
+        img = self.app.tier_images.get(self.tier_key) if self.tier_key else None
+        self.reward_icon.config(image=img or self.app.blank_icon)
 
     def _update_title(self):
         nick = self.nick.get().strip()
         if len(nick) > 26:
             nick = nick[:25] + "…"
         self.title_lbl.config(text=f"Item {self.index + 1}" + (f" — {nick}" if nick else ""))
+
+    def _set_reward(self, tier, sub):
+        key, title, bg, fg = tier
+        self.tier_key = key
+        img = self.app.tier_images.get(key) if key else None
+        for w in (self.reward, self.reward_icon, self.reward_title, self.reward_sub):
+            w.config(bg=bg)
+        self.reward_icon.config(image=img or self.app.blank_icon)
+        self.reward_title.config(text=title, fg=fg)
+        self.reward_sub.config(text=sub, fg=fg)
 
     # ---- events ----------------------------------------------------------- #
     def _on_var(self, *_):
@@ -438,6 +561,7 @@ class Card(ttk.Frame):
         self._rebuild_mats(focus_last=True)
         self.recalc()
         self.app.commit_now()
+        self.app.autosize()
 
     def remove_material(self, i):
         self.app.commit_now()
@@ -445,6 +569,7 @@ class Card(ttk.Frame):
         self._rebuild_mats()
         self.recalc()
         self.app.commit_now()
+        self.app.autosize()
 
     def clear(self):
         ok = messagebox.askyesno(
@@ -474,11 +599,12 @@ class Card(ttk.Frame):
 
     def recalc(self):
         st = self.get_state()
-        profit_mode = st["mode"] == "profit"
-        self.sale_entry.config(state="readonly" if profit_mode else "normal")
-        self.target_entry.config(state="normal" if profit_mode else "readonly")
-        self.sale_lbl.config(text="Preferred sale price" + ("  (auto)" if profit_mode else ""))
-        self.target_lbl.config(text="Preferred profit" + ("" if profit_mode else "  (auto)"))
+        mode = st["mode"]
+        for entry, lbl, name, own in ((self.sale_entry, self.sale_lbl, "Preferred sale price", "price"),
+                                      (self.target_entry, self.target_lbl, "Preferred profit", "profit"),
+                                      (self.pct_entry, self.pct_lbl, "Preferred profit %", "percent")):
+            entry.config(state="normal" if mode == own else "readonly")
+            lbl.config(text=name + ("" if mode == own else "  (auto)"))
         self._update_title()
 
         if self._validate():
@@ -487,16 +613,19 @@ class Card(ttk.Frame):
             for lbl in (self.tax_lbl, self.net_lbl, self.roi_lbl):
                 lbl.config(text="—")
             self.profit_lbl.config(text="Check red fields", foreground=RED)
+            self._set_reward(NEUTRAL_TIER, "Fix the red fields to see your result")
             return
 
         r = compute(st)
         self._updating = True
         try:
             self.total.set(fmt_num(r["cost"]))
-            if profit_mode:
+            if mode != "price":
                 self.sale.set(fmt_num(r["sale"]))
-            else:
+            if mode != "profit":
                 self.target.set(fmt_num(r["profit"]))
+            if mode != "percent":
+                self.pct.set("" if r["roi"] is None else fmt_num(round(r["roi"], 2)))
         finally:
             self._updating = False
 
@@ -514,7 +643,10 @@ class Card(ttk.Frame):
         p = r["profit"]
         color = GREEN if p > 0.005 else RED if p < -0.005 else self.app.default_fg
         self.profit_lbl.config(text=("+" if p > 0.005 else "") + fmt_num(p), foreground=color)
-        self.roi_lbl.config(text="—" if r["roi"] is None else f"{r['roi']:,.1f}%")
+        roi = r["roi"]
+        self.roi_lbl.config(text="—" if roi is None else f"{roi:,.2f}%")
+        self._set_reward(tier_for(roi), "Enter your costs and a sale price" if roi is None
+                         else f"{roi:+,.2f}% return on cost")
 
 
 # --------------------------------------------------------------------------- #
@@ -536,8 +668,14 @@ class App:
         self.saved_json = None
         self.saved_text = "No unsaved changes"
         self._cols = 0
+        self.zoom = 1.0
+        self._img_ratio = (1, 1)
+        self._skip_fit = False
+        self._fit_job = None
+        self._last_size = None
 
         self._setup_style()
+        self._load_icons()
         self._build_toolbar()
         self._build_canvas()
         self._bind_keys()
@@ -548,8 +686,9 @@ class App:
         self.history = [snap]
         self.hidx = 0
         self.saved_json = snap
-        self._size_window()
+        self.autosize()
         self._refresh()
+        root.bind("<Configure>", self._on_root_configure)
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         if self.mac:
@@ -567,6 +706,16 @@ class App:
         self.f_bold = _bumped(base, 0)
         self.f_title = _bumped(base, 2)
         self.f_big = _bumped(base, 5)
+        # every font that should scale with the window, with its size in pixels at zoom 1.0
+        self._zoom_fonts = []
+        for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont"):
+            try:
+                f = tkfont.nametofont(name)
+                self._zoom_fonts.append((f, self._font_px(f)))
+            except tk.TclError:
+                pass
+        for f in (self.f_bold, self.f_title, self.f_big):
+            self._zoom_fonts.append((f, self._font_px(f)))
         style.configure("Muted.TLabel", foreground=MUTED)
         style.configure("Section.TLabel", font=self.f_bold)
         self.default_fg = style.lookup("TLabel", "foreground") or "black"
@@ -575,6 +724,7 @@ class App:
     def _build_toolbar(self):
         bar = ttk.Frame(self.root, padding=(10, 8))
         bar.pack(side="top", fill="x")
+        self.toolbar = bar
         self.add_btn = ttk.Button(bar, text="+ Add Item", command=self.add_card)
         self.add_btn.pack(side="left")
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
@@ -595,6 +745,7 @@ class App:
         wrap.pack(side="top", fill="both", expand=True)
         vs = ttk.Scrollbar(wrap, orient="vertical")
         vs.pack(side="right", fill="y")
+        self.vscroll = vs
         self.canvas = tk.Canvas(wrap, highlightthickness=0, bg=self.canvas_bg,
                                 yscrollincrement=int(20 * self.scale), yscrollcommand=vs.set)
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -623,20 +774,144 @@ class App:
             bind("<Control-y>", self.redo)
         bind(f"<{m}-s>", self.save)
 
-    def _size_window(self):
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        cols = min(len(self.cards), 3)
-        w = min(sw - 40, cols * self.cw + int(50 * self.scale))
-        h = min(sh - 120, int(820 * self.scale))
-        self.root.geometry(f"{w}x{h}")
-        self.root.minsize(min(sw, self.cw + int(50 * self.scale)), int(420 * self.scale))
+    def _font_px(self, font):
+        size = font.actual("size")
+        if size < 0:
+            return -size
+        return max(6, round(size * self.root.winfo_fpixels("1i") / 72.0))
 
-    def _fit_width(self):
+    def _load_icons(self):
+        """Decode the embedded pictures; set the leprechaun as the window icon."""
+        self.tier_images = {}
+        self._base_images = {}
+        self.window_icons = []
+        self.blank_icon = tk.PhotoImage(master=self.root, width=ICON_PX, height=ICON_PX)  # transparent
+        if icons_data is None:
+            return
+        try:
+            for key, b64 in icons_data.TIER_ICONS.items():
+                self._base_images[key] = tk.PhotoImage(master=self.root, data=b64)
+            self.tier_images = dict(self._base_images)
+            self.window_icons = [tk.PhotoImage(master=self.root, data=icons_data.APP_ICONS[size])
+                                 for size in sorted(icons_data.APP_ICONS, reverse=True)]
+            self.root.iconphoto(True, *self.window_icons)
+        except tk.TclError:
+            pass
+
+    # ---- scale the whole UI with the window ----------------------------------------- #
+    def _card_extent(self):
+        """(width, height) one item needs at the current zoom, including the gap around it."""
         self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth()
-        need = min(sw - 40, min(len(self.cards), 3) * self.cw + int(50 * self.scale))
-        if self.root.winfo_width() < need:
-            self.root.geometry(f"{need}x{self.root.winfo_height()}")
+        gap = int(16 * self.scale)
+        return (max(c.winfo_reqwidth() for c in self.cards) + gap,
+                max(c.winfo_reqheight() for c in self.cards) + gap)
+
+    def _apply_zoom(self, z):
+        """Scale fonts and pictures to zoom z. Returns True if anything changed."""
+        z = max(ZOOM_MIN, min(ZOOM_MAX, z))
+        if abs(z - self.zoom) < 0.02:
+            return False
+        for font, base_px in self._zoom_fonts:
+            font.configure(size=-max(7, round(base_px * z)))
+        self.zoom = z
+        a, b = min(IMAGE_RATIOS, key=lambda r: abs(r[0] / r[1] - z))
+        if (a, b) != self._img_ratio:
+            self._img_ratio = (a, b)
+            self.tier_images = {k: (img if (a, b) == (1, 1) else img.zoom(a).subsample(b))
+                                for k, img in self._base_images.items()}
+            side = max(1, round(ICON_PX * a / b))
+            self.blank_icon = tk.PhotoImage(master=self.root, width=side, height=side)
+        for card in self.cards:
+            card.on_zoom()
+        return True
+
+    def _on_root_configure(self, event):
+        if event.widget is not self.root:
+            return
+        size = (event.width, event.height)
+        if size == self._last_size:
+            return
+        self._last_size = size
+        if self._fit_job:
+            self.root.after_cancel(self._fit_job)
+        self._fit_job = self.root.after(40, self._fit_to_window)
+
+    def _fit_to_window(self):
+        """Pick the zoom and number of columns that make all items fill the window."""
+        self._fit_job = None
+        if self._skip_fit or not self.cards:
+            return
+        self.root.update_idletasks()
+        W = self.canvas.winfo_width()
+        H = self.root.winfo_height() - self.toolbar.winfo_height() - 2
+        if W < 60 or H < 60:
+            return
+        n = len(self.cards)
+        cw, ch = self._card_extent()
+        cw1, ch1 = cw / self.zoom, ch / self.zoom      # size of one item at zoom 1.0
+        best = None
+        for cols in range(1, n + 1):
+            rows = -(-n // cols)
+            s = min(W / (cols * cw1), H / (rows * ch1))
+            if best is None or (s, -rows) > best:
+                best = (s, -rows)
+        z = max(ZOOM_MIN, min(ZOOM_MAX, best[0]))
+        changed = False
+        for _ in range(5):                              # fonts come in whole pixels: verify and nudge
+            changed = self._apply_zoom(z) or changed
+            cw, ch = self._card_extent()
+            cols = max(1, min(n, W // cw))
+            if -(-n // cols) * ch <= H or z <= ZOOM_MIN + 0.01:
+                break
+            z = max(ZOOM_MIN, z * 0.94)
+        self._measure()
+        if changed or cols != self._cols:
+            self._layout_cards(force=True, cols=cols)
+
+    def nearest_card(self, x_root, y_root):
+        """The item whose centre is closest to a screen position (used while dragging)."""
+        best, best_d = None, None
+        for c in self.cards:
+            cx = c.winfo_rootx() + c.winfo_width() / 2
+            cy = c.winfo_rooty() + c.winfo_height() / 2
+            d = (cx - x_root) ** 2 + (cy - y_root) ** 2
+            if best_d is None or d < best_d:
+                best, best_d = c, d
+        return best
+
+    def move_card(self, card, new_index):
+        """Move an item to a new position (0 = first). Undo/redo remember the order."""
+        old = self.cards.index(card)
+        new_index = max(0, min(len(self.cards) - 1, new_index))
+        if new_index == old:
+            return
+        self.commit_now()
+        self.cards.insert(new_index, self.cards.pop(old))
+        self._renumber()
+        self._layout_cards(force=True, cols=self._cols or None)
+        self.commit_now()
+        self.root.after(30, lambda: self._scroll_to(card))
+
+    def autosize(self):
+        """Fit the window to the items. Only the size is set, so the top-left corner stays put."""
+        self._skip_fit = True
+        self.root.after(250, lambda: setattr(self, "_skip_fit", False))
+        self._measure()
+        self.root.update_idletasks()
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        sb_w = self.vscroll.winfo_reqwidth()
+        pad = int(8 * self.scale)
+        max_cols = max(1, (sw - 80 - sb_w - pad) // self.cw)
+        cols = max(1, min(len(self.cards), max_cols))
+        self._layout_cards(force=True, cols=cols)
+        self.root.update_idletasks()
+        min_h = int(420 * self.scale)
+        w = cols * self.cw + sb_w + pad
+        h = self.toolbar.winfo_reqheight() + 2 + self.inner.winfo_reqheight() + pad
+        h = max(min_h, min(h, sh - 120))
+        one_item = int(self.cw / self.zoom * ZOOM_MIN)
+        self.root.minsize(min(sw, one_item + sb_w + pad), min(min_h, int(320 * self.scale)))
+        self.root.geometry(f"{w}x{h}")
 
     # ---- layout ----------------------------------------------------------- #
     def _measure(self):
@@ -645,11 +920,12 @@ class App:
             widest = max(c.winfo_reqwidth() for c in self.cards)
             self.cw = max(int(BASE_CARD_W * self.scale), widest + int(20 * self.scale))
 
-    def _layout_cards(self, force=False):
+    def _layout_cards(self, force=False, cols=None):
         if not self.cards:
             return
-        width = self.canvas.winfo_width()
-        cols = max(1, min(len(self.cards), width // self.cw))
+        if cols is None:
+            width = self.canvas.winfo_width()
+            cols = max(1, min(len(self.cards), width // self.cw))
         if cols == self._cols and not force:
             return
         self._cols = cols
@@ -684,7 +960,7 @@ class App:
     def _renumber(self):
         removable = len(self.cards) > 1
         for i, c in enumerate(self.cards):
-            c.set_index(i, removable)
+            c.set_index(i, removable, len(self.cards))
 
     # ---- state / history -------------------------------------------------- #
     def get_state(self):
@@ -751,6 +1027,7 @@ class App:
         if self.hidx > 0:
             self.hidx -= 1
             self._rebuild(json.loads(self.history[self.hidx]))
+            self.autosize()
             self._refresh()
 
     def redo(self):
@@ -758,6 +1035,7 @@ class App:
         if self.hidx < len(self.history) - 1:
             self.hidx += 1
             self._rebuild(json.loads(self.history[self.hidx]))
+            self.autosize()
             self._refresh()
 
     def _refresh(self):
@@ -782,10 +1060,8 @@ class App:
         card = Card(self.inner, self, len(self.cards), copy.deepcopy(DEFAULT_STATE))
         self.cards.append(card)
         self._renumber()
-        self._measure()
-        self._layout_cards(force=True)
         self.commit_now()
-        self._fit_width()
+        self.autosize()
         self.root.after(60, lambda: self._scroll_to(card))
 
     def remove_card(self, card):
@@ -803,8 +1079,8 @@ class App:
         self.cards.remove(card)
         card.destroy()
         self._renumber()
-        self._layout_cards(force=True)
         self.commit_now()
+        self.autosize()
 
     # ---- save / load ------------------------------------------------------ #
     def _read_disk(self):
@@ -860,13 +1136,28 @@ def selftest(out_path):
     _DATA_FILE_OVERRIDE = os.path.join(tempfile.mkdtemp(), "entries.json")
     msg, code, root = "OK", 0, None
     try:
+        for roi, want in ((None, None), (-0.01, "grave"), (0, None), (0.01, "copper_coin"),
+                          (5, "copper_coin"), (5.01, "gold_coin"), (10, "gold_coin"), (10.01, "cash_stack"),
+                          (20, "cash_stack"), (20.01, "money_bag"), (25, "money_bag"), (25.01, "gold_bag")):
+            assert tier_for(roi)[0] == want, f"tier for {roi}% should be {want}, got {tier_for(roi)[0]}"
         root = tk.Tk()
         app = App(root)
+        assert icons_data is not None, "icons_data module is missing from the app"
+        assert len(app.tier_images) == 6, "expected 6 tier pictures, got %d" % len(app.tier_images)
+        for key, img in app.tier_images.items():
+            assert (img.width(), img.height()) == (ICON_PX, ICON_PX), f"picture {key} is the wrong size"
+        assert app.window_icons, "window icon was not loaded"
         assert len(app.cards) == 1, "should start with exactly one item"
+        root.update()
+        x0, y0, w0 = root.winfo_x(), root.winfo_y(), root.winfo_width()
         for _ in range(MAX_ITEMS - 1):
             app.add_card()
-        assert len(app.cards) == MAX_ITEMS, "should allow up to 5 items"
-        assert not app.add_btn.instate(["!disabled"]), "add button should disable at 5 items"
+        root.update()
+        assert len(app.cards) == MAX_ITEMS, f"should allow up to {MAX_ITEMS} items"
+        assert not app.add_btn.instate(["!disabled"]), f"add button should disable at {MAX_ITEMS} items"
+        assert abs(root.winfo_x() - x0) <= 4 and abs(root.winfo_y() - y0) <= 4, "window moved while resizing"
+        if root.winfo_screenwidth() >= 2 * app.cw + 160:
+            assert root.winfo_width() > w0, "window did not grow when items were added"
 
         c = app.cards[0]
         c.base.set("1,000,000")
@@ -880,6 +1171,25 @@ def selftest(out_path):
         assert c.total.get() == "1,800,000", "total cost was " + c.total.get()
         assert c.target.get() == "140,000", "profit was " + c.target.get()
 
+        assert c.tier_key == "cash_stack" or c.tier_key == "gold_bag" or c.tier_key == "money_bag" \
+            or c.tier_key == "gold_coin", "unexpected picture for a profitable item: %r" % c.tier_key
+
+        c.mode.set("percent")
+        c.pct.set("20")
+        root.update()
+        assert c.sale.get() == "2,226,805", "sale price for 20%% was " + c.sale.get()
+        assert c.tier_key == "cash_stack", "exactly 20%% should show the cash stack, got %r" % c.tier_key
+        c.pct.set("30%")
+        root.update()
+        assert c.tier_key == "gold_bag", "30%% should show the gold bag, got %r" % c.tier_key
+        c.pct.set("22")
+        root.update()
+        assert c.tier_key == "money_bag", "22%% should show the money bag, got %r" % c.tier_key
+        c.mode.set("price")
+        c.sale.set("1m")
+        root.update()
+        assert c.tier_key == "grave", "a loss should show the grave, got %r" % c.tier_key
+
         c.mode.set("profit")
         c.target.set("100k")
         root.update()
@@ -891,8 +1201,43 @@ def selftest(out_path):
         c = app.cards[0]
         assert c.target.get() == "100k" and c.sale.get() == "1,958,763", "undo/redo lost state"
 
+        c.nick.set("First")
+        app.cards[1].nick.set("Second")
+        app.commit_now()
+        x, y = c.winfo_rootx() + 5, c.winfo_rooty() + 5
+        assert app.nearest_card(x, y) is c, "nearest_card should find the item under the pointer"
+        app.move_card(app.cards[0], 1)
+        assert [k.nick.get() for k in app.cards[:2]] == ["Second", "First"], "move item failed"
+        assert app.cards[0].index == 0 and app.cards[1].index == 1, "items were not renumbered"
+        app.undo()
+        assert [k.nick.get() for k in app.cards[:2]] == ["First", "Second"], "undo should restore the order"
+        app.redo()
+        assert [k.nick.get() for k in app.cards[:2]] == ["Second", "First"], "redo should reapply the move"
+
+
         app.remove_card(app.cards[-1])
         assert len(app.cards) == MAX_ITEMS - 1, "remove item failed"
+        while len(app.cards) > 2:       # few items, so the zoom range is wide enough to measure
+            app.remove_card(app.cards[-1])
+        for _ in range(20):             # let the pause after an automatic resize end
+            root.update()
+            time.sleep(0.02)
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        root.geometry("640x480")
+        for _ in range(15):
+            root.update()
+            time.sleep(0.02)
+        z_small = app.zoom
+        big_w, big_h = min(1500, sw - 60), min(1000, sh - 120)
+        root.geometry(f"{big_w}x{big_h}")
+        for _ in range(15):
+            root.update()
+            time.sleep(0.02)
+        z_big = app.zoom
+        assert ZOOM_MIN <= z_small <= ZOOM_MAX and ZOOM_MIN <= z_big <= ZOOM_MAX, "zoom out of range"
+        if root.winfo_width() >= big_w - 4 and root.winfo_width() > 640 + 100:
+            assert z_big > z_small, f"UI did not scale up with the window ({z_small:.2f} -> {z_big:.2f})"
+        assert app.tier_images["gold_bag"].width() > 0, "pictures lost after scaling"
         assert app.save() and os.path.exists(data_file()), "save failed"
         root.update()
     except BaseException:
@@ -924,6 +1269,10 @@ def main():
     if sys.platform.startswith("win"):
         try:
             import ctypes
+            try:  # lets Windows show our own icon on the taskbar instead of Python's
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HimekoTachibana.ProfitCalculator")
+            except Exception:
+                pass
             try:
                 ctypes.windll.shcore.SetProcessDpiAwareness(1)
             except Exception:
