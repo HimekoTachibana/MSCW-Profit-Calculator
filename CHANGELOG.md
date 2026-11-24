@@ -37,7 +37,8 @@ First release.
   Windows x64 (`.exe`), macOS Apple Silicon and Intel (`.zip`), Linux x64 and arm64 (`.tar.gz`).
 - GitHub Actions workflow ("Build & Release") that builds every app, starts each built app and
   runs a built-in self-test (`--selftest`) before publishing, and uses this changelog as the
-  release notes. It can also be run manually from the Actions tab to build without releasing.
+  release notes. Run it from the Actions tab: leave **Publish a GitHub release** unticked to just
+  build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
 [Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.0.0...HEAD
