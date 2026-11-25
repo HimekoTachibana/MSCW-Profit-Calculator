@@ -34,6 +34,9 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
   the chance the item is destroyed, expected scroll cost, and the average number of items you need
   to buy per success count.
 
+### Fixed
+- Moving an item and then removing it right away no longer raises a stray error.
+
 ### Changed
 - Return on cost is shown with two decimals.
 - The release workflow downloads build files into `release-files/` so they cannot mix with the

@@ -90,6 +90,7 @@ jobs:
           pyinstaller --onefile --windowed --icon assets/icon.ico --hidden-import icons_data --name ProfitCalculator profit_calculator.py
           Move-Item dist/ProfitCalculator.exe "${{ matrix.asset }}"
       - name: Self-test the built app (Windows)
+        timeout-minutes: 5
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
