@@ -9,6 +9,21 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-25
+
+### Fixed
+- Clicking an item's title (without dragging) could move the item to another position when a
+  taller item sat below a shorter one. Items now only move after a real drag, and they drop onto
+  the item under the pointer.
+- With Caps Lock on, Ctrl+Z (Cmd+Z) redid instead of undoing, and Ctrl+S / Ctrl+Y did nothing.
+  Shortcuts now work the same with Caps Lock on or off.
+- Scrolling the mouse wheel inside an open drop-down list (zoom, scroll type) no longer scrolls the
+  whole window as well.
+
+### Changed
+- The release workflow uses the current GitHub Actions versions (Node.js 24), so runs no longer
+  show the Node.js 20 deprecation warning.
+
 ## [1.2.0] - 2026-11-24
 
 ### Added
@@ -86,7 +101,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/releases/tag/v1.0.0

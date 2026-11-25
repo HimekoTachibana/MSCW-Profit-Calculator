@@ -32,8 +32,8 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       version: ${{ steps.plan.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Decide whether to publish, and which tag
@@ -81,10 +81,10 @@ jobs:
       ASSET: ProfitCalculator-v${{ needs.prepare.outputs.version }}-${{ matrix.base }}${{ matrix.ext }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # ---------------------------------------------------------------- Windows
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: runner.os == 'Windows'
         with:
           python-version: "3.12"
@@ -105,7 +105,7 @@ jobs:
           if ($p.ExitCode -ne 0) { exit 1 }
 
       # ------------------------------------------------------------------ macOS
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: runner.os == 'macOS'
         with:
           python-version: "3.12"
@@ -143,7 +143,7 @@ jobs:
           xvfb-run -a selftest/ProfitCalculator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
           cat selftest-result.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ env.ASSET }}
           path: ${{ env.ASSET }}
@@ -156,11 +156,11 @@ jobs:
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: release-files
           merge-multiple: true
