@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
     icons_data = None
 ICON_PX = getattr(icons_data, "ICON_SIZE", 96)
 
-__version__ = "1.1.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.2.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_ITEMS = 10

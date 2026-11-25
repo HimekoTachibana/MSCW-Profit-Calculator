@@ -9,6 +9,8 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-24
+
 ### Added
 - **Zoom control**: a Zoom box in the toolbar (type a percentage such as `125`, pick from the list, or use the − / + buttons), also under Settings > Zoom. `Auto` keeps the old behaviour of fitting the window; a percentage fixes the zoom (60%-240%) and the items use as many columns as fit. Shortcuts: Ctrl/Cmd and `+`, `-`, `0` (back to Auto). The choice is remembered.
 
@@ -84,6 +86,7 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/releases/tag/v1.0.0
