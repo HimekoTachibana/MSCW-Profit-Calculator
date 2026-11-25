@@ -25,7 +25,14 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 - The whole app scales with the window: resize it by hand and the text, buttons and pictures grow
   or shrink, and the items rearrange into as many columns as fit.
 - The window now resizes itself when items or materials are added or removed. Its top-left corner
-  stays where it is.
+  stays where it is. **Settings > Resize window automatically** turns this off (remembered between
+  launches); with it off the app scales to fit the current window instead.
+- **Scroll Simulator** item (toolbar button "+ Scroll Simulator"; counts toward the 10 items).
+  Enter the item's slots (0-10), add one or more scroll sections (Chaos 10% / 50% destroy on fail,
+  Greater 10%, Intermediate 60%, Lesser 100%) with how many of each you use and the cost per scroll,
+  plus base equipment and its cost. It shows the chance of exactly and at least 1, 2, ... successes,
+  the chance the item is destroyed, expected scroll cost, and the average number of items you need
+  to buy per success count.
 
 ### Changed
 - Return on cost is shown with two decimals.

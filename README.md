@@ -14,6 +14,11 @@ profit is:
 | over 0% | copper coin |
 | loss | grave |
 
+A **Scroll Simulator** card (toolbar button) works out scrolling odds: slots, scrolls of each type
+(Chaos 10% with 50% destroy on fail, Greater 10%, Intermediate 60%, Lesser 100%), the chance of
+getting exactly or at least N successes, and the average number of items to buy per success count.
+Rates follow [MeowDB's scrolling guide](https://meowdb.com/msclassic/forum/guides/Jacob/the-complete-scrolling-guide).
+
 Current version: see [CHANGELOG.md](CHANGELOG.md).
 
 ## Download (no installs needed)
@@ -49,7 +54,7 @@ Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (n
 
 - Numbers accept commas and shorthand: `500k`, `1.5m`, `2b`.
 - Reorder items with the ◀ ▶ buttons, or drag an item's title onto another item.
-- Resize the window and the whole app scales to fit; it also resizes itself as you add or remove items.
+- Resize the window and the whole app scales to fit; it also resizes itself as you add or remove items (turn that off under Settings).
 - Undo / Redo: Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on macOS). Save: Ctrl+S / Cmd+S.
 - Saved entries load automatically on the next launch.
 

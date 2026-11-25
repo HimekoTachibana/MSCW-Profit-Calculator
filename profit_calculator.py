@@ -71,6 +71,7 @@ AMBER = "#b45309"
 MUTED = "#777777"
 
 DEFAULT_STATE = {
+    "type": "profit",
     "nickname": "",
     "base": "",
     "scrolls": "",
@@ -204,6 +205,174 @@ def sanitize_item(d):
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Scroll simulator: the maths (no GUI)
+# --------------------------------------------------------------------------- #
+MAX_SLOTS = 10
+MAX_SECTIONS = 6
+# key: (name shown in the list, chance a scroll succeeds, chance the item is destroyed when it fails)
+SCROLL_KINDS = {
+    "chaos": ("Chaos - 10%, 50% destroy", 0.10, 0.50),
+    "greater": ("Greater - 10%", 0.10, 0.0),
+    "intermediate": ("Intermediate - 60%", 0.60, 0.0),
+    "lesser": ("Lesser - 100%", 1.00, 0.0),
+}
+KIND_BY_LABEL = {v[0]: k for k, v in SCROLL_KINDS.items()}
+
+DEFAULT_SCROLL_STATE = {
+    "type": "scroll",
+    "nickname": "",
+    "equip_cost": "",
+    "slots": "",
+    "basis": "exact",         # "exact": items/cost for exactly k successes, "atleast": k or more
+    "sections": [{"kind": "intermediate", "count": "", "cost": ""}],
+}
+
+
+def parse_int(text, lo=0, hi=None):
+    """Whole number from a box: blank -> 0, anything that is not a whole number in range -> None."""
+    v = parse_num(text)
+    if v is None or abs(v - round(v)) > 1e-9:
+        return None
+    v = int(round(v))
+    if v < lo or (hi is not None and v > hi):
+        return None
+    return v
+
+
+def scroll_odds(seq):
+    """Odds for scrolls used one after another.
+
+    seq: [(chance to succeed, chance the item is destroyed on a failure), ...] in the order used.
+    Every scroll uses one slot whether it passes or fails; a destroyed item ends the run.
+    Returns (alive, destroyed, used):
+      alive[k]  chance the item survives with exactly k successes
+      destroyed chance the item is destroyed
+      used[j]   chance scroll j is actually used (the item is still alive before it)
+    """
+    alive = [1.0]
+    destroyed = 0.0
+    used = []
+    for success, destroy in seq:
+        used.append(sum(alive))
+        nxt = [0.0] * (len(alive) + 1)
+        for k, a in enumerate(alive):
+            nxt[k + 1] += a * success
+            nxt[k] += a * (1.0 - success) * (1.0 - destroy)
+            destroyed += a * (1.0 - success) * destroy
+        alive = nxt
+    return alive, destroyed, used
+
+
+def scroll_report(d):
+    """Everything a scroll simulator shows, or {"error": text} (with "soft": True if nothing is wrong yet)."""
+    slots = parse_int(d.get("slots", ""), 0, MAX_SLOTS)
+    equip = parse_num(d.get("equip_cost", ""))
+    if slots is None:
+        return {"error": f"Slots must be a whole number from 0 to {MAX_SLOTS}."}
+    if equip is None:
+        return {"error": "Equipment cost is not a valid number."}
+    seq = []                                   # (success, destroy, cost each) per scroll, in order
+    for i, sec in enumerate(d.get("sections", []), 1):
+        count = parse_int(sec.get("count", ""), 0, MAX_SLOTS)
+        cost = parse_num(sec.get("cost", ""))
+        if count is None:
+            return {"error": f"Scroll {i}: 'Used' must be a whole number from 0 to {MAX_SLOTS}."}
+        if cost is None:
+            return {"error": f"Scroll {i}: cost is not a valid number."}
+        _, success, destroy = SCROLL_KINDS.get(sec.get("kind"), SCROLL_KINDS["intermediate"])
+        seq += [(success, destroy, cost)] * count
+    n = len(seq)
+    if n == 0:
+        return {"error": "Enter how many scrolls you use.", "soft": True}
+    if n > slots:
+        return {"error": f"That uses {n} scrolls but the item has only {slots} slot{'' if slots == 1 else 's'}."}
+    alive, destroyed, used = scroll_odds([(p, q) for p, q, _ in seq])
+    scroll_cost = sum(cost * u for (_, _, cost), u in zip(seq, used))
+    per_item = equip + scroll_cost
+    rows = []
+    for k in range(1, n + 1):
+        exact, at_least = alive[k], sum(alive[k:])
+        chance = at_least if d.get("basis") == "atleast" else exact
+        items = 1.0 / chance if chance > 0 else math.inf
+        rows.append({"k": k, "exact": exact, "atleast": at_least, "items": items,
+                     "cost": math.inf if items == math.inf else items * per_item})
+    return {"n": n, "slots": slots, "zero": alive[0], "destroyed": destroyed, "equip": equip,
+            "scroll_cost": scroll_cost, "per_item": per_item, "avg_used": sum(used), "rows": rows}
+
+
+def fmt_chance(p):
+    if p <= 0:
+        return "0%"
+    v = p * 100.0
+    return f"{v:,.2f}%" if v >= 0.01 else f"{v:.1e}%"
+
+
+def short_num(v):
+    """123 -> 123, 12,345 -> 12.3k, 1.2e9 -> 1.2b (infinity -> the infinity sign)."""
+    if v is None or math.isnan(v):
+        return "—"
+    if math.isinf(v):
+        return "∞"
+    a = abs(v)
+    for div, suffix in ((1e12, "t"), (1e9, "b"), (1e6, "m"), (1e3, "k")):
+        if a >= div:
+            x = v / div
+            text = f"{x:.0f}" if abs(x) >= 100 else f"{x:.1f}" if abs(x) >= 10 else f"{x:.2f}"
+            if "." in text:
+                text = text.rstrip("0").rstrip(".")
+            return text + suffix
+    return fmt_num(v)
+
+
+def fmt_items(v):
+    if math.isinf(v):
+        return "∞"
+    if v < 10:
+        return f"{v:.2f}"
+    if v < 1000:
+        return f"{v:,.1f}"
+    return short_num(v)
+
+
+def fmt_money(v):
+    return fmt_num(v) if v < 1e12 else short_num(v)
+
+
+def sanitize_scroll(d):
+    """Make a scroll-simulator dict from untrusted data (e.g. a hand-edited save file)."""
+    out = copy.deepcopy(DEFAULT_SCROLL_STATE)
+    if not isinstance(d, dict):
+        return out
+    for k in ("nickname", "equip_cost", "slots"):
+        if isinstance(d.get(k), str):
+            out[k] = d[k]
+    if d.get("basis") in ("exact", "atleast"):
+        out["basis"] = d["basis"]
+    secs = []
+    if isinstance(d.get("sections"), list):
+        for sec in d["sections"][:MAX_SECTIONS]:
+            if isinstance(sec, dict):
+                kind = sec.get("kind") if sec.get("kind") in SCROLL_KINDS else "intermediate"
+                c, p = sec.get("count"), sec.get("cost")
+                secs.append({"kind": kind, "count": c if isinstance(c, str) else "",
+                             "cost": p if isinstance(p, str) else ""})
+    if secs:
+        out["sections"] = secs
+    return out
+
+
+def sanitize_card(d):
+    """Either kind of item card, chosen by its "type" (old save files have none = profit)."""
+    if isinstance(d, dict) and d.get("type") == "scroll":
+        return sanitize_scroll(d)
+    return sanitize_item(d)
+
+
+def default_state(kind="profit"):
+    return copy.deepcopy(DEFAULT_SCROLL_STATE if kind == "scroll" else DEFAULT_STATE)
+
+
 _DATA_FILE_OVERRIDE = None   # set by selftest() only
 
 
@@ -219,6 +388,29 @@ def data_file():
     return os.path.join(base, "ProfitCalculator", "entries.json")
 
 
+def settings_file():
+    return os.path.join(os.path.dirname(data_file()), "settings.json")
+
+
+def load_settings():
+    try:
+        with open(settings_file(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_settings(data):
+    try:
+        os.makedirs(os.path.dirname(settings_file()), exist_ok=True)
+        with open(settings_file(), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except OSError:
+        return False
+
+
 def default_app_state():
     return {"version": 1, "items": [copy.deepcopy(DEFAULT_STATE)]}
 
@@ -231,30 +423,18 @@ def _bumped(base_font, delta):
 
 
 # --------------------------------------------------------------------------- #
-# One item calculator
+# What every item card shares: the header (title, drag handle, move / clear / remove buttons)
 # --------------------------------------------------------------------------- #
-class Card(ttk.Frame):
-    def __init__(self, parent, app, index, state):
+class CardBase(ttk.Frame):
+    kind_label = "Item"          # the title reads "<kind_label> <number>"
+
+    def __init__(self, parent, app, index):
         super().__init__(parent, padding=(12, 10), relief="groove", borderwidth=2)
         self.app = app
         self.index = index
         self._updating = False
-        self.entries = []        # (entry, var, kind) for fixed fields
-        self.mat_entries = []    # same, for material rows (rebuilt often)
-        self.mats = []           # list of (cost_var, qty_var)
-
-        V = tk.StringVar
-        self.nick, self.base, self.scrolls, self.sprice = V(), V(), V(), V()
-        self.sale, self.target, self.pct, self.total = V(), V(), V(), V()
-        self.tier_key = None
         self._drag_target = None
-        self.tax, self.mode = V(value="3%"), V(value="price")
-        for v in (self.nick, self.base, self.scrolls, self.sprice,
-                  self.sale, self.target, self.pct, self.tax, self.mode):
-            v.trace_add("write", self._on_var)
-
-        self._build()
-        self.load_state(state)
+        self.entries = []        # (entry, var, kind) for the fixed fields
 
     # ---- widgets ---------------------------------------------------------- #
     def _entry(self, parent, var, kind, width=14, store=None, bold=False):
@@ -272,30 +452,126 @@ class Card(ttk.Frame):
         (self.entries if store is None else store).append((e, var, kind))
         return e
 
-    def _build(self):
-        app = self.app
-        self.columnconfigure(0, weight=1)
+    def _reformat(self, var, kind):
+        if self.app.suspend:
+            return
+        t = var.get().strip()
+        if not t:
+            return
+        v = parse_num(t, allow_negative=(kind == "signed"))
+        if v is None:
+            return
+        f = fmt_num(v)
+        if f != var.get():
+            var.set(f)
 
+    def _build_header(self):
         head = ttk.Frame(self)
         head.grid(row=0, column=0, sticky="ew")
         head.columnconfigure(0, weight=1)
-        self.title_lbl = ttk.Label(head, text="", font=app.f_title)
+        self.title_lbl = ttk.Label(head, text="", font=self.app.f_title)
         self.title_lbl.grid(row=0, column=0, sticky="w")
         self.title_lbl.config(cursor="fleur")
         for w in (self.title_lbl, head):
             w.bind("<ButtonPress-1>", self._drag_start)
             w.bind("<B1-Motion>", self._drag_move)
             w.bind("<ButtonRelease-1>", self._drag_end)
-        self.left_btn = ttk.Button(head, text="\u25C0", width=3,
+        self.left_btn = ttk.Button(head, text="◀", width=3,
                                    command=lambda: self.app.move_card(self, self.index - 1))
         self.left_btn.grid(row=0, column=1, padx=(6, 0))
-        self.right_btn = ttk.Button(head, text="\u25B6", width=3,
+        self.right_btn = ttk.Button(head, text="▶", width=3,
                                     command=lambda: self.app.move_card(self, self.index + 1))
         self.right_btn.grid(row=0, column=2, padx=(2, 0))
         ttk.Button(head, text="Clear", width=7, command=self.clear).grid(row=0, column=3, padx=(8, 0))
         self.remove_btn = ttk.Button(head, text="Remove", width=8,
                                      command=lambda: self.app.remove_card(self))
         self.remove_btn.grid(row=0, column=4, padx=(4, 0))
+
+    def display_name(self):
+        return self.nick.get().strip() or f"{self.kind_label} {self.index + 1}"
+
+    def set_index(self, i, removable, total=1):
+        self.index = i
+        if removable:
+            self.remove_btn.grid()
+        else:
+            self.remove_btn.grid_remove()
+        if total > 1:
+            self.left_btn.grid()
+            self.right_btn.grid()
+            self.left_btn.state(["disabled" if i == 0 else "!disabled"])
+            self.right_btn.state(["disabled" if i >= total - 1 else "!disabled"])
+        else:
+            self.left_btn.grid_remove()
+            self.right_btn.grid_remove()
+        self._update_title()
+
+    def _update_title(self):
+        nick = self.nick.get().strip()
+        if len(nick) > 26:
+            nick = nick[:25] + "…"
+        self.title_lbl.config(text=f"{self.kind_label} {self.index + 1}" + (f" — {nick}" if nick else ""))
+
+    # ---- drag to reorder -------------------------------------------------- #
+    def _drag_start(self, event):
+        self._drag_target = None
+        self.configure(relief="raised")
+
+    def _drag_move(self, event):
+        target = self.app.nearest_card(event.x_root, event.y_root)
+        if target is not self._drag_target:
+            if self._drag_target is not None:
+                self._drag_target.configure(relief="groove")
+            self._drag_target = target if target is not self else None
+            if self._drag_target is not None:
+                self._drag_target.configure(relief="solid")
+
+    def _drag_end(self, event):
+        target = self.app.nearest_card(event.x_root, event.y_root)
+        for c in self.app.cards:
+            c.configure(relief="groove")
+        self._drag_target = None
+        if target is not None and target is not self:
+            self.app.move_card(self, target.index)
+
+    # ---- events ----------------------------------------------------------- #
+    def _on_var(self, *_):
+        if self._updating or self.app.suspend:
+            return
+        self.recalc()
+        self.app.changed()
+
+    def on_zoom(self):
+        """Called when the whole UI is scaled: refresh what does not scale by itself."""
+
+
+# --------------------------------------------------------------------------- #
+# One item calculator
+# --------------------------------------------------------------------------- #
+class Card(CardBase):
+    def __init__(self, parent, app, index, state):
+        super().__init__(parent, app, index)
+        self.mat_entries = []    # same, for material rows (rebuilt often)
+        self.mats = []           # list of (cost_var, qty_var)
+
+        V = tk.StringVar
+        self.nick, self.base, self.scrolls, self.sprice = V(), V(), V(), V()
+        self.sale, self.target, self.pct, self.total = V(), V(), V(), V()
+        self.tier_key = None
+        self.tax, self.mode = V(value="3%"), V(value="price")
+        for v in (self.nick, self.base, self.scrolls, self.sprice,
+                  self.sale, self.target, self.pct, self.tax, self.mode):
+            v.trace_add("write", self._on_var)
+
+        self._build()
+        self.load_state(state)
+
+    # ---- widgets ---------------------------------------------------------- #
+    def _build(self):
+        app = self.app
+        self.columnconfigure(0, weight=1)
+
+        self._build_header()
 
         body = ttk.Frame(self)
         body.grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -421,6 +697,7 @@ class Card(ttk.Frame):
     # ---- state ------------------------------------------------------------ #
     def get_state(self):
         return {
+            "type": "profit",
             "nickname": self.nick.get(),
             "base": self.base.get(),
             "scrolls": self.scrolls.get(),
@@ -462,47 +739,6 @@ class Card(ttk.Frame):
         typed = {"profit": self.target, "percent": self.pct}.get(self.mode.get(), self.sale)
         return bool(typed.get().strip())
 
-    def display_name(self):
-        return self.nick.get().strip() or f"Item {self.index + 1}"
-
-    def set_index(self, i, removable, total=1):
-        self.index = i
-        if removable:
-            self.remove_btn.grid()
-        else:
-            self.remove_btn.grid_remove()
-        if total > 1:
-            self.left_btn.grid()
-            self.right_btn.grid()
-            self.left_btn.state(["disabled" if i == 0 else "!disabled"])
-            self.right_btn.state(["disabled" if i >= total - 1 else "!disabled"])
-        else:
-            self.left_btn.grid_remove()
-            self.right_btn.grid_remove()
-        self._update_title()
-
-    # ---- drag to reorder -------------------------------------------------- #
-    def _drag_start(self, event):
-        self._drag_target = None
-        self.configure(relief="raised")
-
-    def _drag_move(self, event):
-        target = self.app.nearest_card(event.x_root, event.y_root)
-        if target is not self._drag_target:
-            if self._drag_target is not None:
-                self._drag_target.configure(relief="groove")
-            self._drag_target = target if target is not self else None
-            if self._drag_target is not None:
-                self._drag_target.configure(relief="solid")
-
-    def _drag_end(self, event):
-        target = self.app.nearest_card(event.x_root, event.y_root)
-        for c in self.app.cards:
-            c.configure(relief="groove")
-        self._drag_target = None
-        if target is not None and target is not self:
-            self.app.move_card(self, target.index)
-
     def on_zoom(self):
         """Called when the whole UI is scaled: refresh the things that don't scale by themselves."""
         z = self.app.zoom
@@ -510,12 +746,6 @@ class Card(ttk.Frame):
         self.reward_sub.config(wraplength=int(260 * self.app.scale * z))
         img = self.app.tier_images.get(self.tier_key) if self.tier_key else None
         self.reward_icon.config(image=img or self.app.blank_icon)
-
-    def _update_title(self):
-        nick = self.nick.get().strip()
-        if len(nick) > 26:
-            nick = nick[:25] + "…"
-        self.title_lbl.config(text=f"Item {self.index + 1}" + (f" — {nick}" if nick else ""))
 
     def _set_reward(self, tier, sub):
         key, title, bg, fg = tier
@@ -528,30 +758,11 @@ class Card(ttk.Frame):
         self.reward_sub.config(text=sub, fg=fg)
 
     # ---- events ----------------------------------------------------------- #
-    def _on_var(self, *_):
-        if self._updating or self.app.suspend:
-            return
-        self.recalc()
-        self.app.changed()
-
     def _add_mat_vars(self, cost, qty):
         cv, qv = tk.StringVar(value=cost), tk.StringVar(value=qty)
         cv.trace_add("write", self._on_var)
         qv.trace_add("write", self._on_var)
         self.mats.append((cv, qv))
-
-    def _reformat(self, var, kind):
-        if self.app.suspend:
-            return
-        t = var.get().strip()
-        if not t:
-            return
-        v = parse_num(t, allow_negative=(kind == "signed"))
-        if v is None:
-            return
-        f = fmt_num(v)
-        if f != var.get():
-            var.set(f)
 
     def add_material(self):
         if len(self.mats) >= MAX_MATERIALS:
@@ -650,6 +861,278 @@ class Card(ttk.Frame):
 
 
 # --------------------------------------------------------------------------- #
+# Scroll simulator: odds of 1, 2, 3... successes and what they cost on average
+# --------------------------------------------------------------------------- #
+class ScrollCard(CardBase):
+    kind_label = "Scrolls"
+    LABELS = [v[0] for v in SCROLL_KINDS.values()]
+
+    def __init__(self, parent, app, index, state):
+        super().__init__(parent, app, index)
+        V = tk.StringVar
+        self.nick, self.equip, self.slots = V(), V(), V()
+        self.basis = V(value="exact")
+        self.sections = []       # [{"kind": StringVar (list text), "count": StringVar, "cost": StringVar}]
+        self.sec_entries = []    # entries of the scroll rows (rebuilt often)
+        self.report = None
+        for v in (self.nick, self.equip, self.slots, self.basis):
+            v.trace_add("write", self._on_var)
+        self._build()
+        self.load_state(state)
+
+    # ---- widgets ---------------------------------------------------------- #
+    def _build(self):
+        app = self.app
+        self.columnconfigure(0, weight=1)
+        self._build_header()
+
+        body = ttk.Frame(self)
+        body.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        body.columnconfigure(1, weight=1)
+        r = 0
+
+        def field(text, var, kind):
+            nonlocal r
+            ttk.Label(body, text=text).grid(row=r, column=0, sticky="w", pady=2, padx=(0, 8))
+            self._entry(body, var, kind).grid(row=r, column=1, sticky="ew", pady=2)
+            r += 1
+
+        def sep():
+            nonlocal r
+            ttk.Separator(body).grid(row=r, column=0, columnspan=2, sticky="ew", pady=8)
+            r += 1
+
+        def section(text):
+            nonlocal r
+            ttk.Label(body, text=text, style="Section.TLabel").grid(
+                row=r, column=0, columnspan=2, sticky="w", pady=(0, 3))
+            r += 1
+
+        field("Equipment name", self.nick, "text")
+        field("Equipment cost", self.equip, "cost")
+        field(f"Slots on item (0-{MAX_SLOTS})", self.slots, "int")
+        sep()
+
+        section("Scrolls used")
+        self.hint = ttk.Label(body, text="Every scroll uses 1 slot, pass or fail. Scrolls are used top to bottom.",
+                              style="Muted.TLabel", justify="left", wraplength=int(300 * app.scale))
+        self.hint.grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        self.sec_frame = ttk.Frame(body)
+        self.sec_frame.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(4, 2))
+        r += 1
+        sep()
+
+        section("Results")
+        self.sum_lbls = {}
+        for key, text in (("slots", "Scrolls used / slots"),
+                          ("destroy", "Chance item is destroyed"),
+                          ("zero", "Chance of 0 successes"),
+                          ("avg_used", "Avg scrolls used per item"),
+                          ("scroll_cost", "Avg scroll cost per item"),
+                          ("per_item", "Avg total cost per item")):
+            ttk.Label(body, text=text).grid(row=r, column=0, sticky="w", pady=1, padx=(0, 8))
+            lbl = ttk.Label(body, text="—", anchor="e")
+            lbl.grid(row=r, column=1, sticky="e", pady=1)
+            self.sum_lbls[key] = lbl
+            r += 1
+        self.msg = ttk.Label(body, text="", justify="left", wraplength=int(300 * app.scale))
+        self.msg.grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        r += 1
+        sep()
+
+        section("Chance of each number of successes")
+        ttk.Label(body, text="Average items and cost are for:").grid(row=r, column=0, columnspan=2, sticky="w")
+        r += 1
+        basis_f = ttk.Frame(body)
+        basis_f.grid(row=r, column=0, columnspan=2, sticky="w")
+        ttk.Radiobutton(basis_f, text="Exactly that many", value="exact", variable=self.basis).pack(side="left")
+        ttk.Radiobutton(basis_f, text="At least that many", value="atleast",
+                        variable=self.basis).pack(side="left", padx=(10, 0))
+        r += 1
+
+        self.table = ttk.Frame(body)
+        self.table.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        for c in range(5):
+            self.table.columnconfigure(c, weight=1, uniform="scroll_table")
+        for c, text in enumerate(("Successes", "Exactly", "At least", "Avg items", "Avg cost")):
+            ttk.Label(self.table, text=text, style="Section.TLabel", anchor="e").grid(
+                row=0, column=c, sticky="e", padx=(0, 6))
+        self.table_rows = []
+        for k in range(1, MAX_SLOTS + 1):
+            labels = []
+            for c in range(5):
+                lbl = ttk.Label(self.table, text="", anchor="e")
+                lbl.grid(row=k, column=c, sticky="e", padx=(0, 6), pady=1)
+                labels.append(lbl)
+            self.table_rows.append(labels)
+
+    def _wheel_passthrough(self, event):
+        """Scroll the window instead of changing the list when the wheel is over a drop-down."""
+        self.app._on_wheel(event)
+        return "break"
+
+    def _rebuild_sections(self):
+        f = self.sec_frame
+        for w in f.winfo_children():
+            w.destroy()
+        self.sec_entries = []
+        f.columnconfigure(0, weight=1)
+        for c, text in ((0, "Scroll type"), (1, "Used"), (2, "Cost each")):
+            ttk.Label(f, text=text, style="Muted.TLabel").grid(row=0, column=c, sticky="w" if c == 0 else "e")
+        many = len(self.sections) > 1
+        for i, sec in enumerate(self.sections, start=1):
+            combo = ttk.Combobox(f, textvariable=sec["kind"], values=self.LABELS, state="readonly", width=20)
+            combo.grid(row=i, column=0, sticky="ew", pady=2)
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                combo.bind(seq, self._wheel_passthrough)
+            self._entry(f, sec["count"], "int", width=5, store=self.sec_entries).grid(
+                row=i, column=1, padx=(6, 0), pady=2)
+            self._entry(f, sec["cost"], "cost", width=11, store=self.sec_entries).grid(
+                row=i, column=2, padx=(6, 0), pady=2)
+            btn = ttk.Button(f, text="×", width=2, command=lambda idx=i - 1: self.remove_section(idx))
+            btn.grid(row=i, column=3, padx=(6, 0))
+            if not many:
+                btn.state(["disabled"])
+        n = len(self.sections)
+        add = ttk.Button(f, text=f"+ Add scroll type ({n}/{MAX_SECTIONS})", command=self.add_section)
+        if n >= MAX_SECTIONS:
+            add.state(["disabled"])
+        add.grid(row=n + 1, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+    # ---- state ------------------------------------------------------------ #
+    def _add_section_vars(self, kind_key, count, cost):
+        label = SCROLL_KINDS.get(kind_key, SCROLL_KINDS["intermediate"])[0]
+        sec = {"kind": tk.StringVar(value=label), "count": tk.StringVar(value=count),
+               "cost": tk.StringVar(value=cost)}
+        for v in sec.values():
+            v.trace_add("write", self._on_var)
+        self.sections.append(sec)
+
+    def get_state(self):
+        return {
+            "type": "scroll",
+            "nickname": self.nick.get(),
+            "equip_cost": self.equip.get(),
+            "slots": self.slots.get(),
+            "basis": self.basis.get(),
+            "sections": [{"kind": KIND_BY_LABEL.get(sec["kind"].get(), "intermediate"),
+                          "count": sec["count"].get(), "cost": sec["cost"].get()}
+                         for sec in self.sections],
+        }
+
+    def load_state(self, d):
+        d = sanitize_scroll(d)
+        self._updating = True
+        try:
+            self.nick.set(d["nickname"])
+            self.equip.set(d["equip_cost"])
+            self.slots.set(d["slots"])
+            self.basis.set(d["basis"])
+            self.sections = []
+            for sec in d["sections"]:
+                self._add_section_vars(sec["kind"], sec["count"], sec["cost"])
+        finally:
+            self._updating = False
+        self._rebuild_sections()
+        self.recalc()
+
+    def has_data(self):
+        if any(v.get().strip() for v in (self.nick, self.equip, self.slots)):
+            return True
+        return len(self.sections) > 1 or any(
+            sec["count"].get().strip() or sec["cost"].get().strip() for sec in self.sections)
+
+    def on_zoom(self):
+        wrap = int(300 * self.app.scale * self.app.zoom)
+        self.hint.config(wraplength=wrap)
+        self.msg.config(wraplength=wrap)
+
+    # ---- actions ---------------------------------------------------------- #
+    def add_section(self):
+        if len(self.sections) >= MAX_SECTIONS:
+            return
+        self.app.commit_now()
+        self._add_section_vars("intermediate", "", "")
+        self._rebuild_sections()
+        self.recalc()
+        self.app.commit_now()
+        self.app.autosize()
+
+    def remove_section(self, i):
+        if len(self.sections) <= 1:
+            return
+        self.app.commit_now()
+        del self.sections[i]
+        self._rebuild_sections()
+        self.recalc()
+        self.app.commit_now()
+        self.app.autosize()
+
+    def clear(self):
+        ok = messagebox.askyesno(
+            "Clear scroll simulator",
+            f"Reset “{self.display_name()}” and clear all of its entries?\n\n"
+            "You can bring them back with Undo.",
+            icon="warning", default="no", parent=self.winfo_toplevel())
+        if not ok:
+            return
+        self.app.commit_now()
+        self.load_state(default_state("scroll"))
+        self.app.commit_now()
+
+    # ---- calculation ------------------------------------------------------ #
+    def _validate(self):
+        for e, var, kind in self.entries + self.sec_entries:
+            if kind == "text":
+                continue
+            if kind == "int":
+                ok = parse_int(var.get(), 0, MAX_SLOTS) is not None
+            else:
+                ok = parse_num(var.get()) is not None
+            e.config(bg=BG_OK if ok else BG_BAD)
+
+    def recalc(self):
+        self._update_title()
+        self._validate()
+        rep = scroll_report(self.get_state())
+        self.report = rep
+        if "error" in rep:
+            self.msg.config(text=rep["error"], foreground=MUTED if rep.get("soft") else RED)
+            for lbl in self.sum_lbls.values():
+                lbl.config(text="—")
+            for labels in self.table_rows:
+                for lbl in labels:
+                    lbl.grid_remove()
+            return
+        self.msg.config(text="", foreground=MUTED)
+        n = rep["n"]
+        self.sum_lbls["slots"].config(text=f"{n} of {rep['slots']}")
+        self.sum_lbls["destroy"].config(text=fmt_chance(rep["destroyed"]))
+        self.sum_lbls["zero"].config(text=fmt_chance(rep["zero"]))
+        self.sum_lbls["avg_used"].config(text=f"{rep['avg_used']:.2f}")
+        self.sum_lbls["scroll_cost"].config(text=fmt_money(rep["scroll_cost"]))
+        self.sum_lbls["per_item"].config(text=fmt_money(rep["per_item"]))
+        for i, labels in enumerate(self.table_rows):
+            if i < n:
+                row = rep["rows"][i]
+                texts = (str(row["k"]), fmt_chance(row["exact"]), fmt_chance(row["atleast"]),
+                         fmt_items(row["items"]), short_num(row["cost"]))
+                for lbl, text in zip(labels, texts):
+                    lbl.config(text=text)
+                    lbl.grid()
+            else:
+                for lbl in labels:
+                    lbl.grid_remove()
+
+
+def make_card(parent, app, index, state):
+    """Build the right kind of card for a saved/default state."""
+    cls = ScrollCard if isinstance(state, dict) and state.get("type") == "scroll" else Card
+    return cls(parent, app, index, state)
+
+
+# --------------------------------------------------------------------------- #
 # Application window
 # --------------------------------------------------------------------------- #
 class App:
@@ -673,12 +1156,14 @@ class App:
         self._skip_fit = False
         self._fit_job = None
         self._last_size = None
+        self.auto_resize = tk.BooleanVar(master=root, value=bool(load_settings().get("auto_resize", True)))
 
         self._setup_style()
         self._load_icons()
         self._build_toolbar()
         self._build_canvas()
         self._bind_keys()
+        self._build_menu()
 
         state = self._read_disk() or default_app_state()
         self._rebuild(state)
@@ -686,7 +1171,7 @@ class App:
         self.history = [snap]
         self.hidx = 0
         self.saved_json = snap
-        self.autosize()
+        self.autosize(initial=True)
         self._refresh()
         root.bind("<Configure>", self._on_root_configure)
 
@@ -708,7 +1193,7 @@ class App:
         self.f_big = _bumped(base, 5)
         # every font that should scale with the window, with its size in pixels at zoom 1.0
         self._zoom_fonts = []
-        for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont"):
+        for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont"):
             try:
                 f = tkfont.nametofont(name)
                 self._zoom_fonts.append((f, self._font_px(f)))
@@ -727,6 +1212,9 @@ class App:
         self.toolbar = bar
         self.add_btn = ttk.Button(bar, text="+ Add Item", command=self.add_card)
         self.add_btn.pack(side="left")
+        self.add_scroll_btn = ttk.Button(bar, text="+ Add Scroll Simulator",
+                                         command=lambda: self.add_card("scroll"))
+        self.add_scroll_btn.pack(side="left", padx=(4, 0))
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
         self.undo_btn = ttk.Button(bar, text=f"Undo ({self.mod_name}+Z)", command=self.undo)
         self.undo_btn.pack(side="left")
@@ -773,6 +1261,19 @@ class App:
         if not self.mac:
             bind("<Control-y>", self.redo)
         bind(f"<{m}-s>", self.save)
+
+    def _build_menu(self):
+        menubar = tk.Menu(self.root)
+        settings = tk.Menu(menubar, tearoff=0)
+        settings.add_checkbutton(label="Auto-resize window when adding or removing items",
+                                 variable=self.auto_resize, command=self._on_auto_resize_toggled)
+        menubar.add_cascade(label="Settings", menu=settings)
+        self.root.config(menu=menubar)
+
+    def _on_auto_resize_toggled(self):
+        save_settings({"auto_resize": bool(self.auto_resize.get())})
+        if self.auto_resize.get():
+            self.autosize()
 
     def _font_px(self, font):
         size = font.actual("size")
@@ -855,7 +1356,8 @@ class App:
             s = min(W / (cols * cw1), H / (rows * ch1))
             if best is None or (s, -rows) > best:
                 best = (s, -rows)
-        z = max(ZOOM_MIN, min(ZOOM_MAX, best[0]))
+        z = min(best[0], self.root.winfo_width() / max(1.0, self.toolbar.winfo_reqwidth() / self.zoom))
+        z = max(ZOOM_MIN, min(ZOOM_MAX, z))      # never so big that the toolbar is cut off
         changed = False
         for _ in range(5):                              # fonts come in whole pixels: verify and nudge
             changed = self._apply_zoom(z) or changed
@@ -892,8 +1394,26 @@ class App:
         self.commit_now()
         self.root.after(30, lambda: self._scroll_to(card))
 
-    def autosize(self):
-        """Fit the window to the items. Only the size is set, so the top-left corner stays put."""
+    def _set_minsize(self):
+        """Smallest window: the toolbar, and one item at the smallest zoom."""
+        sw = self.root.winfo_screenwidth()
+        sb_w = self.vscroll.winfo_reqwidth()
+        pad = int(8 * self.scale)
+        one_item = int(self.cw / self.zoom * ZOOM_MIN)
+        toolbar = int(self.toolbar.winfo_reqwidth() / self.zoom * ZOOM_MIN)
+        self.root.minsize(min(sw, max(one_item + sb_w + pad, toolbar)), int(320 * self.scale))
+
+    def autosize(self, initial=False):
+        """Fit the window to the items. Only the size is set, so the top-left corner stays put.
+
+        With Settings > auto-resize switched off the window is left alone: the items are placed
+        and scaled to fit the window as it is."""
+        if not initial and not self.auto_resize.get():
+            self._measure()
+            self._layout_cards(force=True)
+            self._set_minsize()
+            self._fit_to_window()
+            return
         self._skip_fit = True
         self.root.after(250, lambda: setattr(self, "_skip_fit", False))
         self._measure()
@@ -909,8 +1429,7 @@ class App:
         w = cols * self.cw + sb_w + pad
         h = self.toolbar.winfo_reqheight() + 2 + self.inner.winfo_reqheight() + pad
         h = max(min_h, min(h, sh - 120))
-        one_item = int(self.cw / self.zoom * ZOOM_MIN)
-        self.root.minsize(min(sw, one_item + sb_w + pad), min(min_h, int(320 * self.scale)))
+        self._set_minsize()
         self.root.geometry(f"{w}x{h}")
 
     # ---- layout ----------------------------------------------------------- #
@@ -984,7 +1503,7 @@ class App:
             if not isinstance(items, list) or not items:
                 items = [copy.deepcopy(DEFAULT_STATE)]
             for i, it in enumerate(items[:MAX_ITEMS]):
-                self.cards.append(Card(self.inner, self, i, sanitize_item(it)))
+                self.cards.append(make_card(self.inner, self, i, sanitize_card(it)))
             self._renumber()
             self._measure()
             self._layout_cards(force=True)
@@ -1047,17 +1566,18 @@ class App:
         n = len(self.cards)
         self.add_btn.config(text=f"+ Add Item ({n}/{MAX_ITEMS})")
         self.add_btn.state(["disabled" if n >= MAX_ITEMS else "!disabled"])
+        self.add_scroll_btn.state(["disabled" if n >= MAX_ITEMS else "!disabled"])
         if dirty:
             self.status.config(text="● Unsaved changes", foreground=AMBER)
         else:
             self.status.config(text=self.saved_text, foreground=MUTED)
 
     # ---- items ------------------------------------------------------------ #
-    def add_card(self):
+    def add_card(self, kind="profit"):
         if len(self.cards) >= MAX_ITEMS:
             return
         self.commit_now()
-        card = Card(self.inner, self, len(self.cards), copy.deepcopy(DEFAULT_STATE))
+        card = make_card(self.inner, self, len(self.cards), default_state(kind))
         self.cards.append(card)
         self._renumber()
         self.commit_now()
@@ -1140,6 +1660,8 @@ def selftest(out_path):
                           (5, "copper_coin"), (5.01, "gold_coin"), (10, "gold_coin"), (10.01, "cash_stack"),
                           (20, "cash_stack"), (20.01, "money_bag"), (25, "money_bag"), (25.01, "gold_bag")):
             assert tier_for(roi)[0] == want, f"tier for {roi}% should be {want}, got {tier_for(roi)[0]}"
+        alive, destroyed, used = scroll_odds([(1.0, 0.0), (1.0, 0.0), (0.1, 0.5)])
+        assert abs(alive[3] - 0.1) < 1e-12 and abs(alive[2] - 0.45) < 1e-12 and abs(destroyed - 0.45) < 1e-12
         root = tk.Tk()
         app = App(root)
         assert icons_data is not None, "icons_data module is missing from the app"
@@ -1238,6 +1760,62 @@ def selftest(out_path):
         if root.winfo_width() >= big_w - 4 and root.winfo_width() > 640 + 100:
             assert z_big > z_small, f"UI did not scale up with the window ({z_small:.2f} -> {z_big:.2f})"
         assert app.tier_images["gold_bag"].width() > 0, "pictures lost after scaling"
+        # --- Settings > auto-resize off: the window must stay exactly as it is
+        app.auto_resize.set(False)
+        app._on_auto_resize_toggled()
+        assert load_settings().get("auto_resize") is False, "setting was not saved"
+        root.update()
+        size_before = (root.winfo_width(), root.winfo_height())
+        n_before = len(app.cards)
+        app.add_card("scroll")
+        root.update()
+        assert len(app.cards) == n_before + 1, "scroll simulator was not added"
+        assert (root.winfo_width(), root.winfo_height()) == size_before, \
+            "window was resized although auto-resize is switched off"
+        app.auto_resize.set(True)
+        app._on_auto_resize_toggled()
+        assert load_settings().get("auto_resize") is True, "setting was not saved"
+
+        # --- scroll simulator card
+        sc = app.cards[-1]
+        assert isinstance(sc, ScrollCard), "last card should be a scroll simulator"
+        sc.nick.set("Test claw")
+        sc.equip.set("1m")
+        sc.slots.set("3")
+        first = sc.sections[0]
+        first["kind"].set(SCROLL_KINDS["lesser"][0])
+        first["count"].set("2")
+        first["cost"].set("100")
+        sc.add_section()
+        second = sc.sections[1]
+        second["kind"].set(SCROLL_KINDS["chaos"][0])
+        second["count"].set("1")
+        second["cost"].set("500k")
+        root.update()
+        rep_ = sc.report
+        assert rep_ and "error" not in rep_, "scroll report failed: %r" % (rep_,)
+        assert rep_["n"] == 3 and abs(rep_["destroyed"] - 0.45) < 1e-9, "wrong scroll odds"
+        assert abs(rep_["rows"][2]["exact"] - 0.1) < 1e-9, "wrong chance of 3 successes"
+        assert sc.sum_lbls["destroy"].cget("text") == "45.00%", sc.sum_lbls["destroy"].cget("text")
+        assert sc.table_rows[2][1].cget("text") == "10.00%", sc.table_rows[2][1].cget("text")
+        sc.slots.set("2")
+        root.update()
+        assert "only 2 slots" in sc.msg.cget("text"), "too many scrolls for the slots should be reported"
+        sc.slots.set("3")
+        sc.basis.set("atleast")
+        root.update()
+        assert abs(sc.report["rows"][1]["items"] - 1 / sc.report["rows"][1]["atleast"]) < 1e-9
+        sc.remove_section(1)
+        assert len(sc.sections) == 1, "remove scroll type failed"
+        app.move_card(sc, 0)
+        assert app.cards[0] is sc and sc.index == 0, "scroll simulator could not be reordered"
+        app.commit_now()
+        state_now = app.get_state()
+        app.undo()
+        app.redo()
+        assert app.get_state() == state_now, "undo/redo lost the scroll simulator"
+        assert isinstance(app.cards[0], ScrollCard), "scroll simulator type lost after undo/redo"
+
         assert app.save() and os.path.exists(data_file()), "save failed"
         root.update()
     except BaseException:
