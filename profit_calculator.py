@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
     icons_data = None
 ICON_PX = getattr(icons_data, "ICON_SIZE", 96)
 
-__version__ = "1.2.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.2.1"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_ITEMS = 10
@@ -64,6 +64,8 @@ ZOOM_MAX = 2.4          # largest it grows to when the window is made big
 IMAGE_RATIOS = [(1, 2), (3, 5), (2, 3), (3, 4), (4, 5), (1, 1), (5, 4), (4, 3), (3, 2),
                 (5, 3), (7, 4), (2, 1), (9, 4), (5, 2)]
 MAX_VALUE = 1e15
+DRAG_THRESHOLD = 6      # pixels the pointer must move before a press on a title becomes a drag
+SHIFT_MASK = 0x0001     # Tk event.state bit for the Shift key
 
 BG_OK = "#ffffff"
 BG_RO = "#eceff1"
@@ -543,9 +545,16 @@ class CardBase(ttk.Frame):
     # ---- drag to reorder -------------------------------------------------- #
     def _drag_start(self, event):
         self._drag_target = None
-        self.configure(relief="raised")
+        self._press_at = (event.x_root, event.y_root)
+        self._dragging = False
 
     def _drag_move(self, event):
+        if not self._dragging:
+            x0, y0 = getattr(self, "_press_at", None) or (event.x_root, event.y_root)
+            if abs(event.x_root - x0) < DRAG_THRESHOLD and abs(event.y_root - y0) < DRAG_THRESHOLD:
+                return                       # a click (or a tiny wobble) is not a drag
+            self._dragging = True
+            self.configure(relief="raised")
         target = self.app.nearest_card(event.x_root, event.y_root)
         if target is not self._drag_target:
             if self._drag_target is not None:
@@ -555,10 +564,15 @@ class CardBase(ttk.Frame):
                 self._drag_target.configure(relief="solid")
 
     def _drag_end(self, event):
-        target = self.app.nearest_card(event.x_root, event.y_root)
+        dragged = getattr(self, "_dragging", False)
+        self._dragging = False
+        self._press_at = None
         for c in self.app.cards:
             c.configure(relief="groove")
         self._drag_target = None
+        if not dragged:                      # just a click on the title: never move the item
+            return
+        target = self.app.nearest_card(event.x_root, event.y_root)
         if target is not None and target is not self:
             self.app.move_card(self, target.index)
 
@@ -1301,12 +1315,25 @@ class App:
             except tk.TclError:
                 pass
 
-        bind(f"<{m}-z>", self.undo)
-        bind(f"<{m}-Z>", self.redo)
-        bind(f"<{m}-Shift-Z>", self.redo)
+        def letter(ch, plain, shifted=None):
+            # Bind both cases: with Caps Lock on, Tk reports Ctrl+Z as an upper-case "Z". Whether
+            # it means the Shift version is decided by the Shift key itself, not by the letter case.
+            def handler(e, plain=plain, shifted=shifted):
+                use_shift = shifted is not None and bool(getattr(e, "state", 0) & SHIFT_MASK)
+                (shifted if use_shift else plain)()
+                return "break"
+            for key in (ch.lower(), ch.upper()):
+                try:
+                    self.root.bind_all(f"<{m}-{key}>", handler)
+                except tk.TclError:
+                    pass
+            self.key_handlers[ch.lower()] = handler
+
+        self.key_handlers = {}
+        letter("z", self.undo, self.redo)            # Ctrl+Z undo, Ctrl+Shift+Z redo
         if not self.mac:
-            bind("<Control-y>", self.redo)
-        bind(f"<{m}-s>", self.save)
+            letter("y", self.redo)
+        letter("s", self.save)
         for seq in ("equal", "plus"):
             bind(f"<{m}-{seq}>", lambda: self.step_zoom(1))
         bind(f"<{m}-minus>", lambda: self.step_zoom(-1))
@@ -1489,7 +1516,11 @@ class App:
             self._layout_cards(force=True, cols=cols)
 
     def nearest_card(self, x_root, y_root):
-        """The item whose centre is closest to a screen position (used while dragging)."""
+        """The item under a screen position, else the one whose centre is closest (used while dragging)."""
+        for c in self.cards:
+            x, y = c.winfo_rootx(), c.winfo_rooty()
+            if x <= x_root < x + c.winfo_width() and y <= y_root < y + c.winfo_height():
+                return c
         best, best_d = None, None
         for c in self.cards:
             cx = c.winfo_rootx() + c.winfo_width() / 2
@@ -1578,6 +1609,15 @@ class App:
         self._layout_cards()
 
     def _on_wheel(self, e):
+        # Only scroll the page for the main window; an open drop-down list scrolls by itself.
+        w = e.widget
+        if isinstance(w, str):                       # Tk-internal widget, e.g. a drop-down's list
+            return
+        try:
+            if w.winfo_toplevel() is not self.root:
+                return
+        except (AttributeError, KeyError, tk.TclError):
+            return
         if self.canvas.yview() == (0.0, 1.0):
             return
         if e.num == 4:
@@ -1862,6 +1902,15 @@ def selftest(out_path):
         app.commit_now()
         x, y = c.winfo_rootx() + 5, c.winfo_rooty() + 5
         assert app.nearest_card(x, y) is c, "nearest_card should find the item under the pointer"
+        # a click (or a few pixels' wobble) on a title is not a drag: the item must stay put
+        far = app.cards[-1]
+        fx, fy = far.winfo_rootx() + far.winfo_width() // 2, far.winfo_rooty() + far.winfo_height() // 2
+        ev = types.SimpleNamespace
+        c._drag_start(ev(x_root=fx, y_root=fy))
+        c._drag_move(ev(x_root=fx + 2, y_root=fy + 2))
+        c._drag_end(ev(x_root=fx + 2, y_root=fy + 2))
+        assert app.cards[0] is c and [k.nick.get() for k in app.cards[:2]] == ["First", "Second"], \
+            "a click on an item's title moved it"
         app.move_card(app.cards[0], 1)
         assert [k.nick.get() for k in app.cards[:2]] == ["Second", "First"], "move item failed"
         assert app.cards[0].index == 0 and app.cards[1].index == 1, "items were not renumbered"
@@ -1869,6 +1918,11 @@ def selftest(out_path):
         assert [k.nick.get() for k in app.cards[:2]] == ["First", "Second"], "undo should restore the order"
         app.redo()
         assert [k.nick.get() for k in app.cards[:2]] == ["Second", "First"], "redo should reapply the move"
+        # keyboard shortcuts with Caps Lock on (state bit 0x2): Ctrl+Z still undoes, Ctrl+Shift+Z redoes
+        app.key_handlers["z"](types.SimpleNamespace(state=0x2))
+        assert [k.nick.get() for k in app.cards[:2]] == ["First", "Second"], "Ctrl+Z with Caps Lock should undo"
+        app.key_handlers["z"](types.SimpleNamespace(state=0x2 | SHIFT_MASK))
+        assert [k.nick.get() for k in app.cards[:2]] == ["Second", "First"], "Ctrl+Shift+Z should redo"
 
 
         app.remove_card(app.cards[-1])
