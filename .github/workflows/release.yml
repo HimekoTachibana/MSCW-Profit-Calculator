@@ -30,6 +30,7 @@ jobs:
     outputs:
       publish: ${{ steps.plan.outputs.publish }}
       tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,6 +60,7 @@ jobs:
           fi
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version $VERSION | publish=$PUBLISH | tag=$TAG"
 
   build:
@@ -66,13 +68,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Windows x64,         os: windows-latest,   asset: ProfitCalculator-Windows-x64.exe }
-          - { name: macOS Apple Silicon, os: macos-latest,     asset: ProfitCalculator-macOS-AppleSilicon.zip }
-          - { name: macOS Intel,         os: macos-15-intel,   asset: ProfitCalculator-macOS-Intel.zip }
+          - { name: Windows x64,         os: windows-latest,   base: Windows-x64, ext: .exe }
+          - { name: macOS Apple Silicon, os: macos-latest,     base: macOS-AppleSilicon, ext: .zip }
+          - { name: macOS Intel,         os: macos-15-intel,   base: macOS-Intel, ext: .zip }
           # Linux is built on the oldest runner so it also runs on older distributions.
-          - { name: Linux x64,           os: ubuntu-22.04,     asset: ProfitCalculator-Linux-x64.tar.gz }
-          - { name: Linux arm64,         os: ubuntu-22.04-arm, asset: ProfitCalculator-Linux-arm64.tar.gz }
+          - { name: Linux x64,           os: ubuntu-22.04,     base: Linux-x64, ext: .tar.gz }
+          - { name: Linux arm64,         os: ubuntu-22.04-arm, base: Linux-arm64, ext: .tar.gz }
     name: Build ${{ matrix.name }}
+    needs: prepare
+    env:
+      # e.g. ProfitCalculator-v1.1.0-Windows-x64.exe - the version is always in the file name
+      ASSET: ProfitCalculator-v${{ needs.prepare.outputs.version }}-${{ matrix.base }}${{ matrix.ext }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -88,13 +94,13 @@ jobs:
         run: |
           python -m pip install "pyinstaller>=6.10,<7"
           pyinstaller --onefile --windowed --icon assets/icon.ico --hidden-import icons_data --name ProfitCalculator profit_calculator.py
-          Move-Item dist/ProfitCalculator.exe "${{ matrix.asset }}"
+          Move-Item dist/ProfitCalculator.exe "${{ env.ASSET }}"
       - name: Self-test the built app (Windows)
         timeout-minutes: 5
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath ".\${{ matrix.asset }}" -ArgumentList "--selftest","selftest-result.txt" -Wait -PassThru
+          $p = Start-Process -FilePath ".\${{ env.ASSET }}" -ArgumentList "--selftest","selftest-result.txt" -Wait -PassThru
           Get-Content selftest-result.txt
           if ($p.ExitCode -ne 0) { exit 1 }
 
@@ -110,11 +116,11 @@ jobs:
           pyinstaller --windowed --icon assets/icon.icns --hidden-import icons_data --name ProfitCalculator profit_calculator.py
           codesign --force --deep --sign - dist/ProfitCalculator.app
           codesign --verify --deep --strict dist/ProfitCalculator.app
-          ditto -c -k --sequesterRsrc --keepParent dist/ProfitCalculator.app "${{ matrix.asset }}"
+          ditto -c -k --sequesterRsrc --keepParent dist/ProfitCalculator.app "${{ env.ASSET }}"
       - name: Self-test the built app (macOS)
         if: runner.os == 'macOS'
         run: |
-          rm -rf selftest && mkdir selftest && ditto -x -k "${{ matrix.asset }}" selftest
+          rm -rf selftest && mkdir selftest && ditto -x -k "${{ env.ASSET }}" selftest
           selftest/ProfitCalculator.app/Contents/MacOS/ProfitCalculator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
           cat selftest-result.txt
 
@@ -129,18 +135,18 @@ jobs:
           . .venv/bin/activate
           pip install "pyinstaller>=6.10,<7"
           pyinstaller --onefile --hidden-import icons_data --name ProfitCalculator profit_calculator.py
-          tar -czf "${{ matrix.asset }}" -C dist ProfitCalculator
+          tar -czf "${{ env.ASSET }}" -C dist ProfitCalculator
       - name: Self-test the built app (Linux)
         if: runner.os == 'Linux'
         run: |
-          rm -rf selftest && mkdir selftest && tar -xzf "${{ matrix.asset }}" -C selftest
+          rm -rf selftest && mkdir selftest && tar -xzf "${{ env.ASSET }}" -C selftest
           xvfb-run -a selftest/ProfitCalculator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
           cat selftest-result.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
           if-no-files-found: error
 
   publish:

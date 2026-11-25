@@ -9,6 +9,9 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+### Changed
+- Every build's file name now includes the version, e.g. `ProfitCalculator-v1.2.0-Windows-x64.exe`.
+
 ## [1.1.0] - 2026-11-24
 
 ### Added
