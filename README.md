@@ -17,13 +17,15 @@ profit is:
 A **Scroll Simulator** card (toolbar button) works out scrolling odds: slots, scrolls of each type
 (Chaos 10% with 50% destroy on fail, Greater 10%, Intermediate 60%, Lesser 100%), the chance of
 getting exactly or at least N successes, and the average number of items to buy per success count.
+Restart rules let you give up on an item and start over with a new one when N scrolls fail in a row,
+N fail in total, or particular scrolls fail (e.g. "restart if the 1st or 2nd scroll fails").
 Rates follow [MeowDB's scrolling guide](https://meowdb.com/msclassic/forum/guides/Jacob/the-complete-scrolling-guide).
 
 Current version: see [CHANGELOG.md](CHANGELOG.md).
 
 ## Download (no installs needed)
 
-Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.2.1-Windows-x64.exe`). Python is bundled inside,
+Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.3.0-Windows-x64.exe`). Python is bundled inside,
 so there is nothing else to install.
 
 | System | Download | First launch |
