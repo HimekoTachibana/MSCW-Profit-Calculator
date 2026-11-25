@@ -55,6 +55,7 @@ Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (n
 - Numbers accept commas and shorthand: `500k`, `1.5m`, `2b`.
 - Reorder items with the ◀ ▶ buttons, or drag an item's title onto another item.
 - Resize the window and the whole app scales to fit; it also resizes itself as you add or remove items (turn that off under Settings).
+- Zoom: use the toolbar's Zoom box (type `125`, pick a percentage, or use − / +), or Ctrl/Cmd and `+` / `-`; `Auto` (Ctrl/Cmd+0) fits the window.
 - Undo / Redo: Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on macOS). Save: Ctrl+S / Cmd+S.
 - Saved entries load automatically on the next launch.
 

@@ -57,6 +57,7 @@ BASE_CARD_W = 340
 HISTORY_LIMIT = 300
 COMMIT_DELAY_MS = 450
 ZOOM_MIN = 0.6          # smallest the whole UI shrinks to when the window is made small
+ZOOM_PRESETS = (60, 75, 90, 100, 110, 125, 150, 175, 200, 240)   # percent, for the zoom menu
 COMFORT_ZOOM = 1.0       # the UI is never made smaller than this just to avoid scrolling
 ZOOM_MAX = 2.4          # largest it grows to when the window is made big
 # whole-number ratios used to scale the (pixel-art) pictures: zoom(a) then subsample(b)
@@ -394,6 +395,30 @@ def settings_file():
     return os.path.join(os.path.dirname(data_file()), "settings.json")
 
 
+def parse_zoom(text):
+    """'Auto' -> None (fit the window); '125', '125%', '1.25x' -> 1.25. Out of range values are
+    clamped to the allowed zoom. Returns (ok, value); ok is False if the text is not understood."""
+    t = str(text).strip().lower().replace(" ", "")
+    if t in ("auto", "fit"):
+        return True, None
+    if not t:
+        return False, None
+    try:
+        if t.endswith("x"):
+            z = float(t[:-1])
+        else:
+            z = float(t.rstrip("%")) / 100.0
+    except ValueError:
+        return False, None
+    if not math.isfinite(z) or z <= 0:
+        return False, None
+    return True, max(ZOOM_MIN, min(ZOOM_MAX, z))
+
+
+def zoom_label(z):
+    return "Auto" if z is None else f"{round(z * 100)}%"
+
+
 def load_settings():
     try:
         with open(settings_file(), encoding="utf-8") as f:
@@ -404,6 +429,7 @@ def load_settings():
 
 
 def save_settings(data):
+    data = {**load_settings(), **data}          # keep the other settings
     try:
         os.makedirs(os.path.dirname(settings_file()), exist_ok=True)
         with open(settings_file(), "w", encoding="utf-8") as f:
@@ -1158,7 +1184,11 @@ class App:
         self._skip_fit = False
         self._fit_job = None
         self._last_size = None
-        self.auto_resize = tk.BooleanVar(master=root, value=bool(load_settings().get("auto_resize", True)))
+        _cfg = load_settings()
+        self.auto_resize = tk.BooleanVar(master=root, value=bool(_cfg.get("auto_resize", True)))
+        _ok, _z = parse_zoom(_cfg.get("zoom", "auto"))
+        self.manual_zoom = _z if _ok else None          # None = Auto (fit the window)
+        self.zoom_var = tk.StringVar(master=root, value=zoom_label(self.manual_zoom))
 
         self._setup_style()
         self._load_icons()
@@ -1173,6 +1203,8 @@ class App:
         self.history = [snap]
         self.hidx = 0
         self.saved_json = snap
+        if self.manual_zoom is not None:
+            self._apply_zoom(self.manual_zoom)
         self.autosize(initial=True)
         self._refresh()
         root.bind("<Configure>", self._on_root_configure)
@@ -1226,6 +1258,18 @@ class App:
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
         self.save_btn = ttk.Button(bar, text=f"Save ({self.mod_name}+S)", command=self.save)
         self.save_btn.pack(side="left")
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=10)
+        ttk.Label(bar, text="Zoom").pack(side="left")
+        self.zoom_out_btn = ttk.Button(bar, text="\u2212", width=2, command=lambda: self.step_zoom(-1))
+        self.zoom_out_btn.pack(side="left", padx=(6, 0))
+        self.zoom_box = ttk.Combobox(bar, textvariable=self.zoom_var, width=6, justify="center",
+                                     values=["Auto"] + [f"{p}%" for p in ZOOM_PRESETS])
+        self.zoom_box.pack(side="left", padx=2)
+        self.zoom_box.bind("<<ComboboxSelected>>", lambda e: self.set_zoom_text(self.zoom_var.get()))
+        self.zoom_box.bind("<Return>", lambda e: self.set_zoom_text(self.zoom_var.get()))
+        self.zoom_box.bind("<FocusOut>", lambda e: self.set_zoom_text(self.zoom_var.get()))
+        self.zoom_in_btn = ttk.Button(bar, text="+", width=2, command=lambda: self.step_zoom(1))
+        self.zoom_in_btn.pack(side="left")
         self.status = ttk.Label(bar, text="", style="Muted.TLabel")
         self.status.pack(side="right")
         ttk.Separator(self.root).pack(side="top", fill="x")
@@ -1263,12 +1307,22 @@ class App:
         if not self.mac:
             bind("<Control-y>", self.redo)
         bind(f"<{m}-s>", self.save)
+        for seq in ("equal", "plus"):
+            bind(f"<{m}-{seq}>", lambda: self.step_zoom(1))
+        bind(f"<{m}-minus>", lambda: self.step_zoom(-1))
+        bind(f"<{m}-0>", lambda: self.set_zoom(None))
 
     def _build_menu(self):
         menubar = tk.Menu(self.root)
         settings = tk.Menu(menubar, tearoff=0)
         settings.add_checkbutton(label="Auto-resize window when adding or removing items",
                                  variable=self.auto_resize, command=self._on_auto_resize_toggled)
+        zoom_menu = tk.Menu(settings, tearoff=0)
+        for label in ["Auto"] + [f"{p}%" for p in ZOOM_PRESETS]:
+            zoom_menu.add_radiobutton(label="Auto (fit the window)" if label == "Auto" else label,
+                                      variable=self.zoom_var, value=label,
+                                      command=lambda v=label: self.set_zoom_text(v))
+        settings.add_cascade(label="Zoom", menu=zoom_menu)
         menubar.add_cascade(label="Settings", menu=settings)
         self.root.config(menu=menubar)
 
@@ -1276,6 +1330,43 @@ class App:
         save_settings({"auto_resize": bool(self.auto_resize.get())})
         if self.auto_resize.get():
             self.autosize()
+
+    # ---- manual zoom ------------------------------------------------------ #
+    def set_zoom_text(self, text):
+        ok, z = parse_zoom(text)
+        if not ok:                                    # not understood: show the current value again
+            self.zoom_var.set(zoom_label(self.manual_zoom))
+            return
+        self.set_zoom(z)
+
+    def set_zoom(self, z):
+        """z = None for Auto (fit the window), or a factor such as 1.25 for 125%."""
+        if z is not None:
+            z = max(ZOOM_MIN, min(ZOOM_MAX, z))
+        self.zoom_var.set(zoom_label(z))
+        if z == self.manual_zoom:
+            return
+        self.manual_zoom = z
+        save_settings({"zoom": "auto" if z is None else round(z * 100)})
+        self._skip_fit = False
+        if z is None:
+            self._set_minsize()
+            self._fit_to_window()
+            return
+        self._apply_zoom(z)
+        self._measure()
+        self.autosize()                               # resizes the window if auto-resize is on
+
+    def step_zoom(self, direction):
+        """Next preset above (+1) or below (-1) the zoom in use."""
+        now = round((self.manual_zoom or self.zoom) * 100)
+        if direction > 0:
+            cands = [p for p in ZOOM_PRESETS if p > now]
+            target = cands[0] if cands else ZOOM_PRESETS[-1]
+        else:
+            cands = [p for p in ZOOM_PRESETS if p < now]
+            target = cands[-1] if cands else ZOOM_PRESETS[0]
+        self.set_zoom(target / 100.0)
 
     def _font_px(self, font):
         size = font.actual("size")
@@ -1350,6 +1441,14 @@ class App:
         if W < 60 or H < 60:
             return
         n = len(self.cards)
+        if self.manual_zoom is not None:               # fixed zoom: just fill the width with columns
+            changed = self._apply_zoom(self.manual_zoom)
+            self._measure()
+            self._set_minsize()
+            cols = max(1, min(n, W // self.cw))
+            if changed or cols != self._cols:
+                self._layout_cards(force=True, cols=cols)
+            return
         cw, ch = self._card_extent()
         cw1, ch1 = cw / self.zoom, ch / self.zoom      # size of one item at zoom 1.0
         best = None
@@ -1418,8 +1517,9 @@ class App:
         sw = self.root.winfo_screenwidth()
         sb_w = self.vscroll.winfo_reqwidth()
         pad = int(8 * self.scale)
-        one_item = int(self.cw / self.zoom * ZOOM_MIN)
-        toolbar = int(self.toolbar.winfo_reqwidth() / self.zoom * ZOOM_MIN)
+        zmin = self.manual_zoom or ZOOM_MIN          # a fixed zoom keeps the window wide enough for it
+        one_item = int(self.cw / self.zoom * zmin)
+        toolbar = int(self.toolbar.winfo_reqwidth() / self.zoom * zmin)
         self.root.minsize(min(sw, max(one_item + sb_w + pad, toolbar)), int(320 * self.scale))
 
     def autosize(self, initial=False):
@@ -1809,6 +1909,26 @@ def selftest(out_path):
         app.auto_resize.set(True)
         app._on_auto_resize_toggled()
         assert load_settings().get("auto_resize") is True, "setting was not saved"
+
+        # --- manual zoom: percentage typed or picked, and Auto again
+        assert parse_zoom("125%") == (True, 1.25) and parse_zoom("150") == (True, 1.5)
+        assert parse_zoom("Auto") == (True, None) and parse_zoom("abc")[0] is False and parse_zoom("")[0] is False
+        assert parse_zoom("5%") == (True, ZOOM_MIN) and parse_zoom("900") == (True, ZOOM_MAX)
+        app.set_zoom_text("125%")
+        root.update()
+        assert app.manual_zoom == 1.25 and abs(app.zoom - 1.25) < 0.03, "manual zoom was not applied"
+        assert app.zoom_var.get() == "125%"
+        assert load_settings().get("zoom") == 125 and load_settings().get("auto_resize") is True, "zoom not saved"
+        app.set_zoom_text("not a number")
+        assert app.zoom_var.get() == "125%", "bad zoom text should revert"
+        app.step_zoom(1)
+        assert app.manual_zoom == 1.5, "zoom + button"
+        app.step_zoom(-1)
+        app.step_zoom(-1)
+        assert app.manual_zoom == 1.1, "zoom - button"
+        app.set_zoom(None)
+        root.update()
+        assert app.manual_zoom is None and app.zoom_var.get() == "Auto" and load_settings().get("zoom") == "auto"
 
         # --- scroll simulator card
         sc = app.cards[-1]

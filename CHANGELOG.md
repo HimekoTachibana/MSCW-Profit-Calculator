@@ -9,6 +9,9 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+### Added
+- **Zoom control**: a Zoom box in the toolbar (type a percentage such as `125`, pick from the list, or use the − / + buttons), also under Settings > Zoom. `Auto` keeps the old behaviour of fitting the window; a percentage fixes the zoom (60%-240%) and the items use as many columns as fit. Shortcuts: Ctrl/Cmd and `+`, `-`, `0` (back to Auto). The choice is remembered.
+
 ### Fixed
 - With many items the UI no longer shrinks to tiny text to avoid scrolling. It now stays at a readable size (never below 100% unless the window itself is too narrow), uses as many columns as fit, and scrolls vertically for the rest.
 
