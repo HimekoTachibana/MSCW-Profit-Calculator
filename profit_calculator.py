@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
     icons_data = None
 ICON_PX = getattr(icons_data, "ICON_SIZE", 96)
 
-__version__ = "1.2.1"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.3.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_ITEMS = 10
@@ -228,9 +228,13 @@ DEFAULT_SCROLL_STATE = {
     "type": "scroll",
     "nickname": "",
     "equip_cost": "",
-    "slots": "",
-    "basis": "exact",         # "exact": items/cost for exactly k successes, "atleast": k or more
+    "slots": "",              # blank = as many slots as scrolls used
+    "basis": "atleast",       # "exact": items/cost for exactly k successes, "atleast": k or more
     "sections": [{"kind": "intermediate", "count": "", "cost": ""}],
+    # restart rules (blank = off): give up on the item and start again with a new one when...
+    "stop_streak": "",        # ...this many scrolls in a row fail
+    "stop_total": "",         # ...this many scrolls have failed in total
+    "stop_at": "",            # ...any of these scrolls fails, e.g. "1, 2" or "1-3"
 }
 
 
@@ -245,36 +249,79 @@ def parse_int(text, lo=0, hi=None):
     return v
 
 
-def scroll_odds(seq):
-    """Odds for scrolls used one after another.
+def parse_positions(text):
+    """Scroll numbers such as "1, 2" or "1-3" -> {1, 2, 3}. Blank -> empty set, invalid -> None."""
+    t = str(text).replace(" ", "").replace(";", ",").replace("&", ",").rstrip(",")
+    out = set()
+    if not t:
+        return out
+    for part in t.split(","):
+        a, sep, b = part.partition("-")
+        lo, hi = parse_int(a, 1, MAX_SLOTS), parse_int(b, 1, MAX_SLOTS) if sep else None
+        if not a or lo is None or (sep and (not b or hi is None or hi < lo)):
+            return None
+        out.update(range(lo, (hi if sep else lo) + 1))
+    return out
+
+
+def scroll_sim(seq, streak=0, total=0, positions=()):
+    """Odds for scrolls used one after another, with optional restart rules.
 
     seq: [(chance to succeed, chance the item is destroyed on a failure), ...] in the order used.
     Every scroll uses one slot whether it passes or fails; a destroyed item ends the run.
-    Returns (alive, destroyed, used):
-      alive[k]  chance the item survives with exactly k successes
-      destroyed chance the item is destroyed
-      used[j]   chance scroll j is actually used (the item is still alive before it)
+    The item is set aside (restarted with a new one) as soon as a surviving failure makes
+    `streak` fails in a row, `total` fails in all, or happens on a scroll number in `positions`
+    (0 / empty = that rule is off). Restarted items use no more scrolls.
+    Returns (finished, destroyed, restarted, used):
+      finished[k] chance the item gets through every scroll with exactly k successes
+      destroyed   chance the item is destroyed
+      restarted   chance the item is set aside by a restart rule
+      used[j]     chance scroll j is actually used
     """
-    alive = [1.0]
-    destroyed = 0.0
+    positions = set(positions or ())
+    states = {(0, 0, 0): 1.0}          # (successes, fails in a row, fails in total) -> chance
+    destroyed = restarted = 0.0
     used = []
-    for success, destroy in seq:
-        used.append(sum(alive))
-        nxt = [0.0] * (len(alive) + 1)
-        for k, a in enumerate(alive):
-            nxt[k + 1] += a * success
-            nxt[k] += a * (1.0 - success) * (1.0 - destroy)
-            destroyed += a * (1.0 - success) * destroy
-        alive = nxt
-    return alive, destroyed, used
+    for j, (success, destroy) in enumerate(seq, 1):
+        used.append(sum(states.values()))
+        nxt = {}
+        for (k, row, fails), p in states.items():
+            if success > 0:
+                key = (k + 1, 0, fails)
+                nxt[key] = nxt.get(key, 0.0) + p * success
+            fail = p * (1.0 - success)
+            if fail <= 0:
+                continue
+            destroyed += fail * destroy
+            survive = fail * (1.0 - destroy)
+            if survive <= 0:
+                continue
+            row2, fails2 = row + 1, fails + 1
+            if (streak and row2 >= streak) or (total and fails2 >= total) or j in positions:
+                restarted += survive
+            else:
+                key = (k, row2, fails2)
+                nxt[key] = nxt.get(key, 0.0) + survive
+        states = nxt
+    finished = [0.0] * (len(seq) + 1)
+    for (k, _, _), p in states.items():
+        finished[k] += p
+    return finished, destroyed, restarted, used
+
+
+def scroll_odds(seq):
+    """scroll_sim without restart rules: (alive, destroyed, used)."""
+    finished, destroyed, _, used = scroll_sim(seq)
+    return finished, destroyed, used
 
 
 def scroll_report(d):
     """Everything a scroll simulator shows, or {"error": text} (with "soft": True if nothing is wrong yet)."""
-    slots = parse_int(d.get("slots", ""), 0, MAX_SLOTS)
+    slots_text = str(d.get("slots", "")).strip()
+    slots = parse_int(slots_text, 0, MAX_SLOTS)
     equip = parse_num(d.get("equip_cost", ""))
     if slots is None:
-        return {"error": f"Slots must be a whole number from 0 to {MAX_SLOTS}."}
+        return {"error": f"Slots must be a whole number from 0 to {MAX_SLOTS} (or blank)."}
     if equip is None:
         return {"error": "Equipment cost is not a valid number."}
     seq = []                                   # (success, destroy, cost each) per scroll, in order
@@ -282,28 +329,41 @@ def scroll_report(d):
         count = parse_int(sec.get("count", ""), 0, MAX_SLOTS)
         cost = parse_num(sec.get("cost", ""))
         if count is None:
-            return {"error": f"Scroll {i}: 'Used' must be a whole number from 0 to {MAX_SLOTS}."}
+            return {"error": f"Scroll row {i}: 'Used' must be a whole number from 0 to {MAX_SLOTS}."}
         if cost is None:
-            return {"error": f"Scroll {i}: cost is not a valid number."}
+            return {"error": f"Scroll row {i}: cost is not a valid number."}
         _, success, destroy = SCROLL_KINDS.get(sec.get("kind"), SCROLL_KINDS["intermediate"])
         seq += [(success, destroy, cost)] * count
+    streak = parse_int(d.get("stop_streak", ""), 0, MAX_SLOTS)
+    total = parse_int(d.get("stop_total", ""), 0, MAX_SLOTS)
+    positions = parse_positions(d.get("stop_at", ""))
+    if streak is None:
+        return {"error": f"Restart rule: 'fails in a row' must be a whole number from 1 to {MAX_SLOTS} (or blank)."}
+    if total is None:
+        return {"error": f"Restart rule: 'fails in total' must be a whole number from 1 to {MAX_SLOTS} (or blank)."}
+    if positions is None:
+        return {"error": f"Restart rule: list scroll numbers from 1 to {MAX_SLOTS}, e.g. 1, 2 or 1-3."}
     n = len(seq)
     if n == 0:
         return {"error": "Enter how many scrolls you use.", "soft": True}
+    if not slots_text:
+        slots = n                              # blank: the item has exactly the slots you use
     if n > slots:
         return {"error": f"That uses {n} scrolls but the item has only {slots} slot{'' if slots == 1 else 's'}."}
-    alive, destroyed, used = scroll_odds([(p, q) for p, q, _ in seq])
+    finished, destroyed, restarted, used = scroll_sim([(p, q) for p, q, _ in seq], streak, total, positions)
     scroll_cost = sum(cost * u for (_, _, cost), u in zip(seq, used))
     per_item = equip + scroll_cost
     rows = []
     for k in range(1, n + 1):
-        exact, at_least = alive[k], sum(alive[k:])
-        chance = at_least if d.get("basis") == "atleast" else exact
-        items = 1.0 / chance if chance > 0 else math.inf
+        exact, at_least = finished[k], sum(finished[k:])
+        chance = exact if d.get("basis") == "exact" else at_least
+        items = 1.0 / chance if chance > 1e-15 else math.inf
         rows.append({"k": k, "exact": exact, "atleast": at_least, "items": items,
                      "cost": math.inf if items == math.inf else items * per_item})
-    return {"n": n, "slots": slots, "zero": alive[0], "destroyed": destroyed, "equip": equip,
-            "scroll_cost": scroll_cost, "per_item": per_item, "avg_used": sum(used), "rows": rows}
+    rules = bool(streak or total or (positions & set(range(1, n + 1))))
+    return {"n": n, "slots": slots, "zero": finished[0], "destroyed": destroyed, "restarted": restarted,
+            "rules": rules, "equip": equip, "scroll_cost": scroll_cost, "per_item": per_item,
+            "avg_used": sum(used), "rows": rows}
 
 
 def fmt_chance(p):
@@ -349,7 +409,7 @@ def sanitize_scroll(d):
     out = copy.deepcopy(DEFAULT_SCROLL_STATE)
     if not isinstance(d, dict):
         return out
-    for k in ("nickname", "equip_cost", "slots"):
+    for k in ("nickname", "equip_cost", "slots", "stop_streak", "stop_total", "stop_at"):
         if isinstance(d.get(k), str):
             out[k] = d[k]
     if d.get("basis") in ("exact", "atleast"):
@@ -913,11 +973,13 @@ class ScrollCard(CardBase):
         super().__init__(parent, app, index)
         V = tk.StringVar
         self.nick, self.equip, self.slots = V(), V(), V()
-        self.basis = V(value="exact")
+        self.stop_streak, self.stop_total, self.stop_at = V(), V(), V()
+        self.basis = V(value="atleast")
         self.sections = []       # [{"kind": StringVar (list text), "count": StringVar, "cost": StringVar}]
         self.sec_entries = []    # entries of the scroll rows (rebuilt often)
         self.report = None
-        for v in (self.nick, self.equip, self.slots, self.basis):
+        for v in (self.nick, self.equip, self.slots, self.basis,
+                  self.stop_streak, self.stop_total, self.stop_at):
             v.trace_add("write", self._on_var)
         self._build()
         self.load_state(state)
@@ -939,6 +1001,14 @@ class ScrollCard(CardBase):
             self._entry(body, var, kind).grid(row=r, column=1, sticky="ew", pady=2)
             r += 1
 
+        def note(text):
+            nonlocal r
+            lbl = ttk.Label(body, text=text, style="Muted.TLabel", justify="left",
+                            wraplength=int(300 * app.scale))
+            lbl.grid(row=r, column=0, columnspan=2, sticky="w")
+            self.notes.append(lbl)
+            r += 1
+
         def sep():
             nonlocal r
             ttk.Separator(body).grid(row=r, column=0, columnspan=2, sticky="ew", pady=8)
@@ -952,23 +1022,31 @@ class ScrollCard(CardBase):
 
         field("Equipment name", self.nick, "text")
         field("Equipment cost", self.equip, "cost")
+        self.notes = []
         field(f"Slots on item (0-{MAX_SLOTS})", self.slots, "int")
+        note("Leave Slots blank to use as many slots as scrolls.")
         sep()
 
         section("Scrolls used")
-        self.hint = ttk.Label(body, text="Every scroll uses 1 slot, pass or fail. Scrolls are used top to bottom.",
-                              style="Muted.TLabel", justify="left", wraplength=int(300 * app.scale))
-        self.hint.grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
+        note("Every scroll uses 1 slot, pass or fail. Scrolls are used top to bottom.")
         self.sec_frame = ttk.Frame(body)
         self.sec_frame.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(4, 2))
         r += 1
+        sep()
+
+        section("Restart with a new item when")
+        note("Stop scrolling the item and start over with a new one. Leave blank to never restart.")
+        field("This many fails in a row", self.stop_streak, "int")
+        field("This many fails in total", self.stop_total, "int")
+        field("Any of these scrolls fails", self.stop_at, "list")
+        note("e.g. 1, 2 = restart if the 1st or the 2nd scroll fails; 1-3 = any of the first three.")
         sep()
 
         section("Results")
         self.sum_lbls = {}
         for key, text in (("slots", "Scrolls used / slots"),
                           ("destroy", "Chance item is destroyed"),
+                          ("restart", "Chance item is restarted"),
                           ("zero", "Chance of 0 successes"),
                           ("avg_used", "Avg scrolls used per item"),
                           ("scroll_cost", "Avg scroll cost per item"),
@@ -1001,6 +1079,10 @@ class ScrollCard(CardBase):
             ttk.Label(self.table, text=text, style="Section.TLabel", anchor="e").grid(
                 row=0, column=c, sticky="e", padx=(0, 6))
         self.table_rows = []
+        self.table_note = ttk.Label(body, text="", style="Muted.TLabel", justify="left",
+                                    wraplength=int(300 * app.scale))
+        self.table_note.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.notes.append(self.table_note)
         for k in range(1, MAX_SLOTS + 1):
             labels = []
             for c in range(5):
@@ -1058,6 +1140,9 @@ class ScrollCard(CardBase):
             "equip_cost": self.equip.get(),
             "slots": self.slots.get(),
             "basis": self.basis.get(),
+            "stop_streak": self.stop_streak.get(),
+            "stop_total": self.stop_total.get(),
+            "stop_at": self.stop_at.get(),
             "sections": [{"kind": KIND_BY_LABEL.get(sec["kind"].get(), "intermediate"),
                           "count": sec["count"].get(), "cost": sec["cost"].get()}
                          for sec in self.sections],
@@ -1071,6 +1156,9 @@ class ScrollCard(CardBase):
             self.equip.set(d["equip_cost"])
             self.slots.set(d["slots"])
             self.basis.set(d["basis"])
+            self.stop_streak.set(d["stop_streak"])
+            self.stop_total.set(d["stop_total"])
+            self.stop_at.set(d["stop_at"])
             self.sections = []
             for sec in d["sections"]:
                 self._add_section_vars(sec["kind"], sec["count"], sec["cost"])
@@ -1080,15 +1168,16 @@ class ScrollCard(CardBase):
         self.recalc()
 
     def has_data(self):
-        if any(v.get().strip() for v in (self.nick, self.equip, self.slots)):
+        if any(v.get().strip() for v in (self.nick, self.equip, self.slots,
+                                         self.stop_streak, self.stop_total, self.stop_at)):
             return True
         return len(self.sections) > 1 or any(
             sec["count"].get().strip() or sec["cost"].get().strip() for sec in self.sections)
 
     def on_zoom(self):
         wrap = int(300 * self.app.scale * self.app.zoom)
-        self.hint.config(wraplength=wrap)
-        self.msg.config(wraplength=wrap)
+        for lbl in self.notes + [self.msg]:
+            lbl.config(wraplength=wrap)
 
     # ---- actions ---------------------------------------------------------- #
     def add_section(self):
@@ -1130,6 +1219,8 @@ class ScrollCard(CardBase):
                 continue
             if kind == "int":
                 ok = parse_int(var.get(), 0, MAX_SLOTS) is not None
+            elif kind == "list":
+                ok = parse_positions(var.get()) is not None
             else:
                 ok = parse_num(var.get()) is not None
             e.config(bg=BG_OK if ok else BG_BAD)
@@ -1143,6 +1234,7 @@ class ScrollCard(CardBase):
             self.msg.config(text=rep["error"], foreground=MUTED if rep.get("soft") else RED)
             for lbl in self.sum_lbls.values():
                 lbl.config(text="—")
+            self.table_note.config(text="")
             for labels in self.table_rows:
                 for lbl in labels:
                     lbl.grid_remove()
@@ -1151,10 +1243,16 @@ class ScrollCard(CardBase):
         n = rep["n"]
         self.sum_lbls["slots"].config(text=f"{n} of {rep['slots']}")
         self.sum_lbls["destroy"].config(text=fmt_chance(rep["destroyed"]))
+        self.sum_lbls["restart"].config(text=fmt_chance(rep["restarted"]) if rep["rules"] else "—")
         self.sum_lbls["zero"].config(text=fmt_chance(rep["zero"]))
         self.sum_lbls["avg_used"].config(text=f"{rep['avg_used']:.2f}")
         self.sum_lbls["scroll_cost"].config(text=fmt_money(rep["scroll_cost"]))
         self.sum_lbls["per_item"].config(text=fmt_money(rep["per_item"]))
+        basis = "exactly" if self.basis.get() == "exact" else "at least"
+        self.table_note.config(text=(
+            f"Avg items = how many items you buy on average to finish one with {basis} that many "
+            "successes; Avg cost = that many items plus the scrolls used on them."
+            + (" Restarted and destroyed items count as misses." if rep["rules"] or rep["destroyed"] > 0 else "")))
         for i, labels in enumerate(self.table_rows):
             if i < n:
                 row = rep["rows"][i]
@@ -2013,6 +2111,25 @@ def selftest(out_path):
         sc.basis.set("atleast")
         root.update()
         assert abs(sc.report["rows"][1]["items"] - 1 / sc.report["rows"][1]["atleast"]) < 1e-9
+        # restart rules: lesser, lesser, chaos; restart if scroll 3 fails -> 90% x 50% survive = 45%
+        assert sc.sum_lbls["restart"].cget("text") == "—", "no restart rule should show a dash"
+        sc.stop_at.set("3")
+        root.update()
+        assert abs(sc.report["restarted"] - 0.45) < 1e-9, "wrong restart chance: %r" % (sc.report,)
+        assert sc.sum_lbls["restart"].cget("text") == "45.00%", sc.sum_lbls["restart"].cget("text")
+        sc.stop_at.set("0")
+        root.update()
+        assert "Restart rule" in sc.msg.cget("text"), "a bad scroll number should be reported"
+        sc.stop_at.set("")
+        sc.stop_streak.set("1")
+        root.update()
+        assert abs(sc.report["restarted"] - 0.45) < 1e-9, "fails-in-a-row rule"
+        sc.stop_streak.set("")
+        sc.slots.set("")
+        root.update()
+        assert "error" not in sc.report and sc.report["slots"] == 3, "blank slots should mean 'as many as used'"
+        sc.slots.set("3")
+        root.update()
         sc.remove_section(1)
         assert len(sc.sections) == 1, "remove scroll type failed"
         app.move_card(sc, 0)

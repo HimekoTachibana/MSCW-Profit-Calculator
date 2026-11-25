@@ -9,6 +9,26 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-25
+
+### Added
+- **Restart rules in the Scroll Simulator.** A new "Restart with a new item when" section stops
+  scrolling an item and starts over with a new one when:
+  - this many scrolls fail **in a row** (e.g. `2`),
+  - this many scrolls have failed **in total** (e.g. `2` = give up once a 2nd scroll fails), or
+  - **any of the listed scrolls** fails (e.g. `1, 2` = restart if the 1st or 2nd scroll fails;
+    `1-3` = any of the first three).
+  Restarted items use no more scrolls, so the average scrolls used and scroll cost per item drop
+  to match. A new **Chance item is restarted** result shows how often a rule kicks in, and
+  restarted items count as misses in the success table.
+
+### Changed
+- Scroll Simulator **Slots** can be left blank: the item then has as many slots as the scrolls
+  you use. No more red error while you are still filling it in.
+- New Scroll Simulators show average items and cost for **at least** that many successes by
+  default (what you usually want when aiming for a target). "Exactly" is still one click away.
+- A short note under the success table explains what Avg items and Avg cost mean.
+
 ## [1.2.1] - 2026-11-25
 
 ### Fixed
@@ -101,7 +121,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.0.0...v1.1.0
