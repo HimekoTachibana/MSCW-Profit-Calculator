@@ -57,6 +57,7 @@ BASE_CARD_W = 340
 HISTORY_LIMIT = 300
 COMMIT_DELAY_MS = 450
 ZOOM_MIN = 0.6          # smallest the whole UI shrinks to when the window is made small
+COMFORT_ZOOM = 1.0       # the UI is never made smaller than this just to avoid scrolling
 ZOOM_MAX = 2.4          # largest it grows to when the window is made big
 # whole-number ratios used to scale the (pixel-art) pictures: zoom(a) then subsample(b)
 IMAGE_RATIOS = [(1, 2), (3, 5), (2, 3), (3, 4), (4, 5), (1, 1), (5, 4), (4, 3), (3, 2),
@@ -1357,14 +1358,31 @@ class App:
             s = min(W / (cols * cw1), H / (rows * ch1))
             if best is None or (s, -rows) > best:
                 best = (s, -rows)
-        z = min(best[0], self.root.winfo_width() / max(1.0, self.toolbar.winfo_reqwidth() / self.zoom))
+        fit_all = best[0] >= COMFORT_ZOOM            # everything fits at a readable size
+        tb_cap = self.root.winfo_width() / max(1.0, self.toolbar.winfo_reqwidth() / self.zoom)
+        if fit_all:
+            z, want_cols = best[0], None
+        else:
+            # Too many items to show at a readable size: keep the text readable, use as many
+            # columns as fit at that size, and let the window scroll vertically.
+            want_cols = 1
+            for cols in range(n, 0, -1):
+                if W / (cols * cw1) >= COMFORT_ZOOM:
+                    want_cols = cols
+                    break
+            z = W / (want_cols * cw1)
+        z = min(z, tb_cap)
         z = max(ZOOM_MIN, min(ZOOM_MAX, z))      # never so big that the toolbar is cut off
         changed = False
         for _ in range(5):                              # fonts come in whole pixels: verify and nudge
             changed = self._apply_zoom(z) or changed
             cw, ch = self._card_extent()
             cols = max(1, min(n, W // cw))
-            if -(-n // cols) * ch <= H or z <= ZOOM_MIN + 0.01:
+            if want_cols is not None:
+                cols = max(1, min(want_cols, cols))
+                if W >= cols * cw or z <= ZOOM_MIN + 0.01:
+                    break
+            elif -(-n // cols) * ch <= H or z <= ZOOM_MIN + 0.01:
                 break
             z = max(ZOOM_MIN, z * 0.94)
         self._measure()

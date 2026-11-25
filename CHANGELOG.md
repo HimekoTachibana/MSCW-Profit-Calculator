@@ -9,6 +9,9 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+### Fixed
+- With many items the UI no longer shrinks to tiny text to avoid scrolling. It now stays at a readable size (never below 100% unless the window itself is too narrow), uses as many columns as fit, and scrolls vertically for the rest.
+
 ### Changed
 - Every build's file name now includes the version, e.g. `ProfitCalculator-v1.2.0-Windows-x64.exe`.
 
