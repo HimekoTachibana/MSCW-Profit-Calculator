@@ -2,7 +2,7 @@
 
 Quickly work out profit when buying, crafting and selling items. Compare up to 10 items at once,
 include scroll and material costs, apply 3% or 5% tax, and type in a sale price, a profit or a
-profit % - the other two are worked out for you. A picture under the results shows how good the
+profit % - the other two are worked out for you. A small picture beside the profit % shows how good the
 profit is:
 
 | Profit % (of total cost) | Picture |
@@ -25,7 +25,7 @@ Current version: see [CHANGELOG.md](CHANGELOG.md).
 
 ## Download (no installs needed)
 
-Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.3.0-Windows-x64.exe`). Python is bundled inside,
+Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.3.1-Windows-x64.exe`). Python is bundled inside,
 so there is nothing else to install.
 
 | System | Download | First launch |
@@ -56,7 +56,7 @@ Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (n
 
 - Numbers accept commas and shorthand: `500k`, `1.5m`, `2b`.
 - Reorder items with the ◀ ▶ buttons, or drag an item's title onto another item.
-- Resize the window and the whole app scales to fit; it also resizes itself as you add or remove items (turn that off under Settings).
+- Resize the window and the whole app scales to fit; it can also resize itself as you add or remove items (turn that on under Settings).
 - Zoom: use the toolbar's Zoom box (type `125`, pick a percentage, or use − / +), or Ctrl/Cmd and `+` / `-`; `Auto` (Ctrl/Cmd+0) fits the window.
 - Undo / Redo: Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on macOS). Save: Ctrl+S / Cmd+S.
 - Saved entries load automatically on the next launch.

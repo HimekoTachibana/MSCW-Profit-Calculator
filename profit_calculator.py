@@ -45,9 +45,9 @@ try:  # the embedded pictures are optional - the app still works without them
     import icons_data
 except Exception:  # pragma: no cover
     icons_data = None
-ICON_PX = getattr(icons_data, "ICON_SIZE", 96)
+ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.3.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.3.1"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_ITEMS = 10
@@ -682,7 +682,7 @@ class Card(CardBase):
 
         def sep():
             nonlocal r
-            ttk.Separator(body).grid(row=r, column=0, columnspan=2, sticky="ew", pady=8)
+            ttk.Separator(body).grid(row=r, column=0, columnspan=2, sticky="ew", pady=4)
             r += 1
 
         def section(text):
@@ -694,9 +694,9 @@ class Card(CardBase):
         def field(text, var, kind, **kw):
             nonlocal r
             lbl = ttk.Label(body, text=text)
-            lbl.grid(row=r, column=0, sticky="w", pady=2, padx=(0, 8))
+            lbl.grid(row=r, column=0, sticky="w", pady=1, padx=(0, 8))
             e = self._entry(body, var, kind, **kw)
-            e.grid(row=r, column=1, sticky="ew", pady=2)
+            e.grid(row=r, column=1, sticky="ew", pady=1)
             r += 1
             return lbl, e
 
@@ -739,12 +739,11 @@ class Card(CardBase):
         for t in TAX_CHOICES:
             ttk.Radiobutton(tax_f, text=t, value=t, variable=self.tax).pack(side="left", padx=(8, 0))
         r += 1
-        ttk.Label(body, text="I want to type in:").grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        r += 1
+        ttk.Label(body, text="I type in:").grid(row=r, column=0, sticky="w", pady=1)
         mode_f = ttk.Frame(body)
-        mode_f.grid(row=r, column=0, columnspan=2, sticky="w")
+        mode_f.grid(row=r, column=1, sticky="e")
         for text, value in (("Sale price", "price"), ("Profit", "profit"), ("Profit %", "percent")):
-            ttk.Radiobutton(mode_f, text=text, value=value, variable=self.mode).pack(side="left", padx=(0, 10))
+            ttk.Radiobutton(mode_f, text=text, value=value, variable=self.mode).pack(side="left", padx=(8, 0))
         r += 1
         self.sale_lbl, self.sale_entry = field("Preferred sale price", self.sale, "cost")
         self.target_lbl, self.target_entry = field("Preferred profit", self.target, "signed")
@@ -755,17 +754,16 @@ class Card(CardBase):
         self.tax_lbl = result("Tax paid")
         self.net_lbl = result("You receive after tax")
         self.profit_lbl = result("Profit", big=True)
-        self.roi_lbl = result("Return on cost")
-
-        self.reward = tk.Frame(body, highlightthickness=1, highlightbackground="#c8ccd0")
-        self.reward.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ttk.Label(body, text="Return on cost").grid(row=r, column=0, sticky="w", pady=1)
+        roi_f = ttk.Frame(body)                      # [picture] [verdict] [profit %]
+        roi_f.grid(row=r, column=1, sticky="e", pady=1)
         r += 1
-        self.reward_icon = tk.Label(self.reward, bd=0, image=app.blank_icon)
-        self.reward_icon.pack(pady=(12, 4))
-        self.reward_title = tk.Label(self.reward, text="", font=app.f_title)
-        self.reward_title.pack()
-        self.reward_sub = tk.Label(self.reward, text="", wraplength=int(260 * app.scale))
-        self.reward_sub.pack(pady=(0, 12))
+        self.roi_lbl = ttk.Label(roi_f, text="\u2014", anchor="e", font=app.f_bold)
+        self.roi_lbl.pack(side="right")
+        self.reward_title = ttk.Label(roi_f, text="", font=app.f_bold)
+        self.reward_title.pack(side="right", padx=(0, 8))
+        self.reward_icon = ttk.Label(roi_f, image=app.blank_icon)
+        self.reward_icon.pack(side="right", padx=(0, 6))
 
     def _rebuild_mats(self, focus_last=False):
         f = self.mat_frame
@@ -845,19 +843,15 @@ class Card(CardBase):
         """Called when the whole UI is scaled: refresh the things that don't scale by themselves."""
         z = self.app.zoom
         self.breakdown.config(wraplength=int(300 * self.app.scale * z))
-        self.reward_sub.config(wraplength=int(260 * self.app.scale * z))
         img = self.app.tier_images.get(self.tier_key) if self.tier_key else None
         self.reward_icon.config(image=img or self.app.blank_icon)
 
-    def _set_reward(self, tier, sub):
-        key, title, bg, fg = tier
+    def _set_reward(self, tier):
+        key, title, _bg, fg = tier
         self.tier_key = key
         img = self.app.tier_images.get(key) if key else None
-        for w in (self.reward, self.reward_icon, self.reward_title, self.reward_sub):
-            w.config(bg=bg)
         self.reward_icon.config(image=img or self.app.blank_icon)
-        self.reward_title.config(text=title, fg=fg)
-        self.reward_sub.config(text=sub, fg=fg)
+        self.reward_title.config(text="" if tier is NEUTRAL_TIER else title, foreground=fg)
 
     # ---- events ----------------------------------------------------------- #
     def _add_mat_vars(self, cost, qty):
@@ -926,7 +920,7 @@ class Card(CardBase):
             for lbl in (self.tax_lbl, self.net_lbl, self.roi_lbl):
                 lbl.config(text="—")
             self.profit_lbl.config(text="Check red fields", foreground=RED)
-            self._set_reward(NEUTRAL_TIER, "Fix the red fields to see your result")
+            self._set_reward(NEUTRAL_TIER)
             return
 
         r = compute(st)
@@ -958,8 +952,7 @@ class Card(CardBase):
         self.profit_lbl.config(text=("+" if p > 0.005 else "") + fmt_num(p), foreground=color)
         roi = r["roi"]
         self.roi_lbl.config(text="—" if roi is None else f"{roi:,.2f}%")
-        self._set_reward(tier_for(roi), "Enter your costs and a sale price" if roi is None
-                         else f"{roi:+,.2f}% return on cost")
+        self._set_reward(tier_for(roi))
 
 
 # --------------------------------------------------------------------------- #
@@ -1011,7 +1004,7 @@ class ScrollCard(CardBase):
 
         def sep():
             nonlocal r
-            ttk.Separator(body).grid(row=r, column=0, columnspan=2, sticky="ew", pady=8)
+            ttk.Separator(body).grid(row=r, column=0, columnspan=2, sticky="ew", pady=4)
             r += 1
 
         def section(text):
@@ -1297,7 +1290,7 @@ class App:
         self._fit_job = None
         self._last_size = None
         _cfg = load_settings()
-        self.auto_resize = tk.BooleanVar(master=root, value=bool(_cfg.get("auto_resize", True)))
+        self.auto_resize = tk.BooleanVar(master=root, value=bool(_cfg.get("auto_resize", False)))
         _ok, _z = parse_zoom(_cfg.get("zoom", "auto"))
         self.manual_zoom = _z if _ok else None          # None = Auto (fit the window)
         self.zoom_var = tk.StringVar(master=root, value=zoom_label(self.manual_zoom))
@@ -1508,7 +1501,7 @@ class App:
         if icons_data is None:
             return
         try:
-            for key, b64 in icons_data.TIER_ICONS.items():
+            for key, b64 in icons_data.TIER_ICONS_SMALL.items():
                 self._base_images[key] = tk.PhotoImage(master=self.root, data=b64)
             self.tier_images = dict(self._base_images)
             self.window_icons = [tk.PhotoImage(master=self.root, data=icons_data.APP_ICONS[size])
@@ -1551,9 +1544,8 @@ class App:
         if size == self._last_size:
             return
         self._last_size = size
-        if self._fit_job:
-            self.root.after_cancel(self._fit_job)
-        self._fit_job = self.root.after(40, self._fit_to_window)
+        if self._fit_job is None:       # throttle (not debounce): keep up with the drag, don't wait for its end
+            self._fit_job = self.root.after(50, self._fit_to_window)
 
     def _fit_to_window(self):
         """Pick the zoom and number of columns that make all items fill the window."""
@@ -1596,7 +1588,7 @@ class App:
                     break
             z = W / (want_cols * cw1)
         z = min(z, tb_cap)
-        z = max(ZOOM_MIN, min(ZOOM_MAX, z))      # never so big that the toolbar is cut off
+        z = max(ZOOM_MIN, min(ZOOM_MAX, math.floor(z * 20 + 1e-6) / 20.0))   # 5% steps, rounded down so it fits
         changed = False
         for _ in range(5):                              # fonts come in whole pixels: verify and nudge
             changed = self._apply_zoom(z) or changed
@@ -1941,6 +1933,8 @@ def selftest(out_path):
             assert (img.width(), img.height()) == (ICON_PX, ICON_PX), f"picture {key} is the wrong size"
         assert app.window_icons, "window icon was not loaded"
         assert len(app.cards) == 1, "should start with exactly one item"
+        assert app.auto_resize.get() is False, "auto-resize should be off by default"
+        app.auto_resize.set(True)       # the checks below are about resizing
         root.update()
         x0, y0, w0 = root.winfo_x(), root.winfo_y(), root.winfo_width()
         for _ in range(MAX_ITEMS - 1):

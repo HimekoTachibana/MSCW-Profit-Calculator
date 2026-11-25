@@ -9,6 +9,19 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-25
+
+### Changed
+- **Resize window automatically is now off by default** (Settings > Resize window automatically). If
+  you already turned it on, your choice is kept.
+- **Smaller, tighter item cards** so more fit on screen: the big picture panel under the results is
+  gone. The profit picture is now a small icon beside the verdict and the profit % on the
+  "Return on cost" line, the "I type in" options share one line, and spacing is tighter.
+
+### Fixed
+- Resizing the window no longer feels laggy: the UI now rescales while you drag instead of waiting
+  until you stop, and it rescales in 5% steps so far fewer redraws are needed.
+
 ## [1.3.0] - 2026-11-25
 
 ### Added
@@ -121,7 +134,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.1.0...v1.2.0
