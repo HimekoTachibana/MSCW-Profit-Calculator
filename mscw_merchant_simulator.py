@@ -57,7 +57,7 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.8.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.6.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5
@@ -496,7 +496,7 @@ def data_file():
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     new = os.path.join(base, "MSCW Merchant Simulator")
-    old = os.path.join(base, "ProfitCalculator")          # folder used before the rename (v1.7.0 and older)
+    old = os.path.join(base, "ProfitCalculator")          # folder used before the rename (before 1.6.0)
     if not os.path.isdir(new) and os.path.isdir(old):
         try:                                              # keep the user's saved cards and settings
             import shutil

@@ -9,20 +9,16 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
-## [1.8.0] - 2026-11-25
+## [1.6.0] - 2026-11-25
 
-### Changed
+Everything since 1.5.0 (versions 1.5.1 to 1.8.0 were never published separately).
+
+### Added
 - **The app is now called "MSCW Merchant Simulator".** The window title reads
   `MSCW Merchant Simulator v<version>`, and downloads are named
   `MSCW-Merchant-Simulator-v<version>-<system>.<ext>` (hyphens, because GitHub turns spaces in file
-  names into dots). Earlier entries below keep the old name, "Profit Calculator".
-- Your saved cards and settings are copied over automatically from the old data folder.
-- Older versions (1.7.0 and before) look for files with the old name, so they cannot update
-  themselves to this release: download it once by hand, after that updating works as before.
-
-## [1.7.0] - 2026-11-25
-
-### Added
+  names into dots). Earlier entries below keep the old name, "Profit Calculator". Your saved cards
+  and settings are copied over automatically from the old data folder.
 - **Settings > What's new (changelog)** opens the full changelog, newest version first. Every
   download carries the changelog of its own version.
 - **Updates from Settings.** *Check for updates now* looks for a newer release on GitHub. By default
@@ -31,29 +27,21 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
   it and restart (your entries are saved first), No = skip that version, Cancel = ask again later.
   *Install updates automatically* skips the question. The download is checked against the
   release's `SHA256SUMS.txt` and thrown away if it does not match. Only the downloaded apps can
-  update themselves; running from source just offers the download page. Your first update to this
-  version has to be downloaded by hand, since older versions cannot update themselves.
-
-### Changed
-- The release workflow now also runs the updater tests on Windows, macOS and Linux (including a
-  real PowerShell swap of a locked file on Windows) and embeds the changelog before each build.
-
-## [1.6.0] - 2026-11-25
-
-### Added
+  update themselves; running from source just offers the download page. Older versions (1.5.0 and
+  before) cannot update themselves, so download this version by hand once.
 - **Per scroll success** table in the Scroll Simulator (under Results). For each scroll type you
   use it shows, per 1 success of that type (multiply by N for N successes): the **base items** you
   go through, the **scrolls used**, the **base item cost** and that scroll type's **cost**. For
   example, a single Chaos scroll at 10% needs about 10 base items per success. Items that fail,
   are destroyed or restart are already counted in those numbers.
 
-## [1.5.1] - 2026-11-25
-
 ### Changed
 - Scroll Simulator: how many copies of the base item you need is now spelled out. The success
   table's columns are **Base items** (copies bought on average, including the finished one) and
   **Duplicates** (the others), and the "Scrolls used" table gets a **Base items** column next to
   the scroll counts, so each success count shows the base items and the scrolls of each type side by side.
+- The release workflow now also runs the updater tests on Windows, macOS and Linux (including a
+  real PowerShell swap of a locked file on Windows) and embeds the changelog before each build.
 
 ## [1.5.0] - 2026-11-25
 
@@ -216,11 +204,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.8.0...HEAD
-[1.8.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...v1.8.0
-[1.7.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...v1.7.0
-[1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.1...v1.6.0
-[1.5.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.5.1
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.1...v1.3.2
