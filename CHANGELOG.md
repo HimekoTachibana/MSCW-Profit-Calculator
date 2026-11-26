@@ -9,6 +9,15 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-25
+
+### Added
+- **Per scroll success** table in the Scroll Simulator (under Results). For each scroll type you
+  use it shows, per 1 success of that type (multiply by N for N successes): the **base items** you
+  go through, the **scrolls used**, the **base item cost** and that scroll type's **cost**. For
+  example, a single Chaos scroll at 10% needs about 10 base items per success. Items that fail,
+  are destroyed or restart are already counted in those numbers.
+
 ## [1.5.1] - 2026-11-25
 
 ### Changed
@@ -178,7 +187,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...v1.4.0
