@@ -9,6 +9,15 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-25
+
+### Changed
+- **More compact Scroll Simulator** so it is closer to the height of a normal item card: equipment
+  cost and slots share a line, the "Add scroll type" button sits on the "Scrolls used" heading,
+  the three restart fields take two lines, results are shown in two columns, the exactly /
+  at-least choice sits on the "Successes" heading line, and the explanatory notes are shorter.
+  All numbers are unchanged.
+
 ## [1.3.1] - 2026-11-25
 
 ### Changed
@@ -134,7 +143,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.0...v1.2.1

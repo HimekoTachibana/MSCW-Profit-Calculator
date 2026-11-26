@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
     icons_data = None
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.3.1"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.3.2"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_ITEMS = 10
@@ -1013,59 +1013,83 @@ class ScrollCard(CardBase):
                 row=r, column=0, columnspan=2, sticky="w", pady=(0, 3))
             r += 1
 
-        field("Equipment name", self.nick, "text")
-        field("Equipment cost", self.equip, "cost")
         self.notes = []
-        field(f"Slots on item (0-{MAX_SLOTS})", self.slots, "int")
-        note("Leave Slots blank to use as many slots as scrolls.")
-        sep()
-
-        section("Scrolls used")
-        note("Every scroll uses 1 slot, pass or fail. Scrolls are used top to bottom.")
-        self.sec_frame = ttk.Frame(body)
-        self.sec_frame.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(4, 2))
+        field("Equipment", self.nick, "text")
+        pair = ttk.Frame(body)                       # cost and slots share one line
+        pair.grid(row=r, column=0, columnspan=2, sticky="ew", pady=1)
+        pair.columnconfigure(1, weight=1)
+        ttk.Label(pair, text="Cost").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._entry(pair, self.equip, "cost").grid(row=0, column=1, sticky="ew")
+        ttk.Label(pair, text=f"Slots (0-{MAX_SLOTS}, blank = auto)").grid(row=0, column=2, sticky="w", padx=(12, 8))
+        self._entry(pair, self.slots, "int", width=4).grid(row=0, column=3)
         r += 1
         sep()
 
+        self.sec_head = ttk.Frame(body)              # "Scrolls used" with the add button on the same line
+        self.sec_head.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+        self.sec_head.columnconfigure(0, weight=1)
+        ttk.Label(self.sec_head, text="Scrolls used", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        self.add_btn = None
+        r += 1
+        self.sec_frame = ttk.Frame(body)
+        self.sec_frame.grid(row=r, column=0, columnspan=2, sticky="ew")
+        r += 1
+        note("Used top to bottom; every scroll uses 1 slot, pass or fail.")
+        sep()
+
         section("Restart with a new item when")
-        note("Stop scrolling the item and start over with a new one. Leave blank to never restart.")
-        field("This many fails in a row", self.stop_streak, "int")
-        field("This many fails in total", self.stop_total, "int")
-        field("Any of these scrolls fails", self.stop_at, "list")
-        note("e.g. 1, 2 = restart if the 1st or the 2nd scroll fails; 1-3 = any of the first three.")
+        rs = ttk.Frame(body)
+        rs.grid(row=r, column=0, columnspan=2, sticky="ew")
+        rs.columnconfigure(1, weight=1)
+        rs.columnconfigure(3, weight=1)
+        ttk.Label(rs, text="Fails in a row").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
+        self._entry(rs, self.stop_streak, "int", width=5).grid(row=0, column=1, sticky="ew", pady=1)
+        ttk.Label(rs, text="Fails in total").grid(row=0, column=2, sticky="w", padx=(12, 8), pady=1)
+        self._entry(rs, self.stop_total, "int", width=5).grid(row=0, column=3, sticky="ew", pady=1)
+        ttk.Label(rs, text="Any of these scrolls fails (e.g. 1, 2 or 1-3)").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=1)
+        self._entry(rs, self.stop_at, "list", width=8).grid(row=1, column=3, sticky="ew", pady=1)
+        r += 1
+        note("Blank = never restart. Restarting stops scrolling that item and starts a new one.")
         sep()
 
         section("Results")
         self.sum_lbls = {}
-        for key, text in (("slots", "Scrolls used / slots"),
-                          ("destroy", "Chance item is destroyed"),
-                          ("restart", "Chance item is restarted"),
-                          ("zero", "Chance of 0 successes"),
-                          ("avg_used", "Avg scrolls used per item"),
-                          ("scroll_cost", "Avg scroll cost per item"),
-                          ("per_item", "Avg total cost per item")):
-            ttk.Label(body, text=text).grid(row=r, column=0, sticky="w", pady=1, padx=(0, 8))
-            lbl = ttk.Label(body, text="—", anchor="e")
-            lbl.grid(row=r, column=1, sticky="e", pady=1)
+        grid = ttk.Frame(body)                       # two columns of label + value
+        grid.grid(row=r, column=0, columnspan=2, sticky="ew")
+        for c in (1, 3):
+            grid.columnconfigure(c, weight=1)
+        items = (("slots", "Scrolls / slots"), ("avg_used", "Avg scrolls used"),
+                 ("destroy", "Chance destroyed"), ("restart", "Chance restarted"),
+                 ("zero", "Chance of 0 successes"), ("scroll_cost", "Avg scroll cost"),
+                 ("per_item", "Avg total cost / item"), (None, None))
+        for idx, (key, text) in enumerate(items):
+            if key is None:
+                continue
+            row, col = divmod(idx, 2)
+            c0 = col * 2
+            ttk.Label(grid, text=text).grid(row=row, column=c0, sticky="w", pady=1,
+                                            padx=(0 if col == 0 else 16, 6))
+            lbl = ttk.Label(grid, text="\u2014", anchor="e")
+            lbl.grid(row=row, column=c0 + 1, sticky="e", pady=1)
             self.sum_lbls[key] = lbl
-            r += 1
+        r += 1
         self.msg = ttk.Label(body, text="", justify="left", wraplength=int(300 * app.scale))
-        self.msg.grid(row=r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.msg.grid(row=r, column=0, columnspan=2, sticky="w", pady=(2, 0))
         r += 1
         sep()
 
-        section("Chance of each number of successes")
-        ttk.Label(body, text="Average items and cost are for:").grid(row=r, column=0, columnspan=2, sticky="w")
-        r += 1
-        basis_f = ttk.Frame(body)
-        basis_f.grid(row=r, column=0, columnspan=2, sticky="w")
-        ttk.Radiobutton(basis_f, text="Exactly that many", value="exact", variable=self.basis).pack(side="left")
-        ttk.Radiobutton(basis_f, text="At least that many", value="atleast",
-                        variable=self.basis).pack(side="left", padx=(10, 0))
+        head = ttk.Frame(body)                       # title, then the exact/at-least choice on one line
+        head.grid(row=r, column=0, columnspan=2, sticky="ew")
+        ttk.Label(head, text="Successes", style="Section.TLabel").pack(side="left")
+        ttk.Radiobutton(head, text="Avg for exactly N", value="exact", variable=self.basis).pack(
+            side="right")
+        ttk.Radiobutton(head, text="Avg for at least N", value="atleast", variable=self.basis).pack(
+            side="right", padx=(0, 10))
         r += 1
 
         self.table = ttk.Frame(body)
-        self.table.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.table.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         for c in range(5):
             self.table.columnconfigure(c, weight=1, uniform="scroll_table")
         for c, text in enumerate(("Successes", "Exactly", "At least", "Avg items", "Avg cost")):
@@ -1074,13 +1098,13 @@ class ScrollCard(CardBase):
         self.table_rows = []
         self.table_note = ttk.Label(body, text="", style="Muted.TLabel", justify="left",
                                     wraplength=int(300 * app.scale))
-        self.table_note.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.table_note.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.notes.append(self.table_note)
         for k in range(1, MAX_SLOTS + 1):
             labels = []
             for c in range(5):
                 lbl = ttk.Label(self.table, text="", anchor="e")
-                lbl.grid(row=k, column=c, sticky="e", padx=(0, 6), pady=1)
+                lbl.grid(row=k, column=c, sticky="e", padx=(0, 6), pady=0)
                 labels.append(lbl)
             self.table_rows.append(labels)
 
@@ -1100,7 +1124,7 @@ class ScrollCard(CardBase):
         many = len(self.sections) > 1
         for i, sec in enumerate(self.sections, start=1):
             combo = ttk.Combobox(f, textvariable=sec["kind"], values=self.LABELS, state="readonly", width=20)
-            combo.grid(row=i, column=0, sticky="ew", pady=2)
+            combo.grid(row=i, column=0, sticky="ew", pady=1)
             for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
                 combo.bind(seq, self._wheel_passthrough)
             self._entry(f, sec["count"], "int", width=5, store=self.sec_entries).grid(
@@ -1112,10 +1136,13 @@ class ScrollCard(CardBase):
             if not many:
                 btn.state(["disabled"])
         n = len(self.sections)
-        add = ttk.Button(f, text=f"+ Add scroll type ({n}/{MAX_SECTIONS})", command=self.add_section)
+        if self.add_btn is not None:
+            self.add_btn.destroy()
+        self.add_btn = ttk.Button(self.sec_head, text=f"+ Add scroll type ({n}/{MAX_SECTIONS})",
+                                  command=self.add_section)
         if n >= MAX_SECTIONS:
-            add.state(["disabled"])
-        add.grid(row=n + 1, column=0, columnspan=4, sticky="w", pady=(4, 0))
+            self.add_btn.state(["disabled"])
+        self.add_btn.grid(row=0, column=1, sticky="e")
 
     # ---- state ------------------------------------------------------------ #
     def _add_section_vars(self, kind_key, count, cost):
@@ -1243,8 +1270,8 @@ class ScrollCard(CardBase):
         self.sum_lbls["per_item"].config(text=fmt_money(rep["per_item"]))
         basis = "exactly" if self.basis.get() == "exact" else "at least"
         self.table_note.config(text=(
-            f"Avg items = how many items you buy on average to finish one with {basis} that many "
-            "successes; Avg cost = that many items plus the scrolls used on them."
+            f"Avg items = items you buy on average to get one with {basis} that many successes; "
+            "Avg cost adds the scrolls used."
             + (" Restarted and destroyed items count as misses." if rep["rules"] or rep["destroyed"] > 0 else "")))
         for i, labels in enumerate(self.table_rows):
             if i < n:
