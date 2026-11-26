@@ -49,3 +49,10 @@ The pictures live in `assets/source/`. After replacing one, run `python scripts/
 Pushing a tag also works: `git tag v1.1.0 && git push origin v1.1.0`. The tag must match
 `__version__`. To check locally: `python scripts/release_notes.py --check v1.1.0`; to preview the
 release notes: `python scripts/release_notes.py v1.1.0`.
+
+## How in-app updates find a release
+
+The app asks GitHub for the repository's *latest* release and looks for the file named
+`ProfitCalculator-v<version>-<system>.<ext>` plus `SHA256SUMS.txt`. The workflow produces exactly
+those names, so do not rename release files by hand. Draft and pre-releases are not offered.
+`python tests/test_updater.py` checks the logic locally.

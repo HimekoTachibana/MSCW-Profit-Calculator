@@ -34,9 +34,14 @@ import copy
 import json
 import math
 import os
+import queue
+import re
 import sys
+import tempfile
+import threading
 import time
 import types
+import webbrowser
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, ttk
@@ -45,9 +50,14 @@ try:  # the embedded pictures are optional - the app still works without them
     import icons_data
 except Exception:  # pragma: no cover
     icons_data = None
+try:
+    import updater
+except Exception:  # pragma: no cover - the app still works without update support
+    updater = None
+UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.6.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.7.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_MATERIALS = 5
@@ -1423,6 +1433,26 @@ class ScrollCard(CardBase):
                     lbl.grid_remove()
 
 
+def changelog_lines(text):
+    """CHANGELOG.md -> [(tag, text)] for the What's new window: headings, bullets and plain lines."""
+    out = []
+    for raw in text.splitlines():
+        line = raw.rstrip().replace("**", "")
+        if not line.strip() or line.startswith("# ") or re.match(r"^\[[^\]]+\]: ", line):
+            continue
+        if line.startswith("## "):
+            out.append(("h2", line[3:]))
+        elif line.startswith("### "):
+            out.append(("h3", line[4:]))
+        elif line.lstrip().startswith("- "):
+            out.append(("bullet", "\u2022 " + line.lstrip()[2:]))
+        elif line.startswith(" "):
+            out.append(("cont", line.strip()))
+        else:
+            out.append(("", line))
+    return out
+
+
 def make_card(parent, app, index, state):
     """Build the right kind of card for a saved/default state."""
     cls = ScrollCard if isinstance(state, dict) and state.get("type") == "scroll" else Card
@@ -1458,6 +1488,10 @@ class App:
         _ok, _z = parse_zoom(_cfg.get("zoom", "auto"))
         self.manual_zoom = _z if _ok else None          # None = Auto (fit the window)
         self.zoom_var = tk.StringVar(master=root, value=zoom_label(self.manual_zoom))
+        self.check_updates = tk.BooleanVar(master=root, value=bool(_cfg.get("check_updates", True)))
+        self.auto_install = tk.BooleanVar(master=root, value=bool(_cfg.get("auto_install", False)))
+        self._update_busy = False
+        self._changelog_win = None
 
         self._setup_style()
         self._load_icons()
@@ -1477,6 +1511,8 @@ class App:
         self.autosize(initial=True)
         self._refresh()
         root.bind("<Configure>", self._on_root_configure)
+        if updater is not None and UPDATES_ENABLED and self.check_updates.get():
+            root.after(3000, lambda: self.check_for_updates(manual=False))      # quietly, in the background
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         if self.mac:
@@ -1605,8 +1641,170 @@ class App:
                                       variable=self.zoom_var, value=label,
                                       command=lambda v=label: self.set_zoom_text(v))
         settings.add_cascade(label="Zoom", menu=zoom_menu)
+        settings.add_separator()
+        settings.add_command(label="What's new (changelog)...", command=self.show_changelog)
+        settings.add_separator()
+        settings.add_command(label=f"Check for updates now (you have v{__version__})",
+                             command=lambda: self.check_for_updates(manual=True))
+        settings.add_checkbutton(label="Check for updates when the app starts",
+                                 variable=self.check_updates, command=self._on_update_settings)
+        settings.add_checkbutton(label="Install updates automatically (no question asked)",
+                                 variable=self.auto_install, command=self._on_update_settings)
         menubar.add_cascade(label="Settings", menu=settings)
         self.root.config(menu=menubar)
+
+    def _on_update_settings(self):
+        save_settings({"check_updates": bool(self.check_updates.get()),
+                       "auto_install": bool(self.auto_install.get())})
+
+    # ---- changelog -------------------------------------------------------- #
+    def show_changelog(self):
+        """Settings > What's new: the changelog of this version and every one before it."""
+        if self._changelog_win is not None and self._changelog_win.winfo_exists():
+            self._changelog_win.lift()
+            return
+        try:
+            from changelog_data import CHANGELOG as text
+        except Exception:
+            messagebox.showinfo(APP_NAME, "The changelog is not included in this copy of the app.\n\n"
+                                f"You can read it on the Releases page:\n{updater.RELEASES_PAGE if updater else ''}",
+                                parent=self.root)
+            return
+        win = tk.Toplevel(self.root)
+        self._changelog_win = win
+        win.title(f"{APP_NAME} - What's new")
+        win.geometry("760x560")
+        box = ttk.Frame(win)
+        box.pack(fill="both", expand=True)
+        box.columnconfigure(0, weight=1)
+        box.rowconfigure(0, weight=1)
+        view = tk.Text(box, wrap="word", padx=14, pady=10, relief="flat", borderwidth=0)
+        bar = ttk.Scrollbar(box, orient="vertical", command=view.yview)
+        view.config(yscrollcommand=bar.set)
+        view.grid(row=0, column=0, sticky="nsew")
+        bar.grid(row=0, column=1, sticky="ns")
+        view.tag_configure("h2", font=self.f_title, spacing1=14, spacing3=2)
+        view.tag_configure("h3", font=self.f_bold, spacing1=6)
+        view.tag_configure("bullet", lmargin1=12, lmargin2=26)
+        view.tag_configure("cont", lmargin1=26, lmargin2=26)
+        for line in changelog_lines(text):
+            kind, body = line
+            view.insert("end", body + "\n", kind)
+        view.config(state="disabled")
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 8))
+
+    # ---- updates ---------------------------------------------------------- #
+    def check_for_updates(self, manual=False):
+        """Ask GitHub for the newest release in the background; manual=True also reports 'up to date' and errors."""
+        if updater is None or not UPDATES_ENABLED or self._update_busy:
+            return
+        self._update_busy = True
+        results = queue.Queue()
+
+        def work():
+            try:
+                results.put(("ok", updater.fetch_latest()))
+            except Exception as exc:
+                results.put(("err", str(exc)))
+        threading.Thread(target=work, daemon=True).start()
+        self._poll(results, lambda res: self._on_update_info(res, manual))
+
+    def _poll(self, results, done):
+        try:
+            item = results.get_nowait()
+        except queue.Empty:
+            self.root.after(150, lambda: self._poll(results, done))
+            return
+        done(item)
+
+    def _on_update_info(self, res, manual):
+        self._update_busy = False
+        if res[0] == "err":
+            if manual:
+                messagebox.showerror(APP_NAME, f"Could not check for updates.\n\n{res[1]}", parent=self.root)
+            return
+        info = res[1]
+        if not updater.is_newer(info["version"], __version__):
+            if manual:
+                messagebox.showinfo(APP_NAME, f"You are up to date (version {__version__}).", parent=self.root)
+            return
+        if not manual and load_settings().get("skip_version") == info["version"]:
+            return
+        if not manual and self.auto_install.get() and updater.can_self_update():
+            self._install_update(info)
+            return
+        notes = "\n".join(l for l in info["notes"].splitlines() if l.strip())[:900]
+        head = f"Version {info['version']} is available (you have {__version__}).\n\n{notes}\n\n"
+        if not updater.can_self_update():
+            if messagebox.askyesno(APP_NAME, head + "This copy cannot update itself (it is not the downloaded "
+                                   "app). Open the download page?", parent=self.root):
+                webbrowser.open(info["page"])
+            return
+        ans = messagebox.askyesnocancel(
+            APP_NAME, head + "Yes = update now and restart\nNo = skip this version\nCancel = ask me again later",
+            parent=self.root)
+        if ans:
+            self._install_update(info)
+        elif ans is False:
+            save_settings({"skip_version": info["version"]})
+
+    def _install_update(self, info):
+        win = tk.Toplevel(self.root)
+        win.title("Updating")
+        win.resizable(False, False)
+        label = ttk.Label(win, text=f"Downloading version {info['version']}...", padding=(20, 14, 20, 6))
+        label.pack()
+        bar = ttk.Progressbar(win, length=320, mode="determinate", maximum=100)
+        bar.pack(padx=20, pady=(0, 16))
+        win.protocol("WM_DELETE_WINDOW", lambda: None)          # not while it is downloading
+        results = queue.Queue()
+
+        def work():
+            try:
+                folder = tempfile.mkdtemp(prefix="pc-update-")
+                last = [-1]
+
+                def progress(done, total):
+                    pct = int(done * 100 / total) if total else 0
+                    if pct != last[0]:
+                        last[0] = pct
+                        results.put(("p", pct))
+                results.put(("done", updater.prepare(info, folder, progress)))
+            except Exception as exc:
+                results.put(("err", str(exc)))
+        threading.Thread(target=work, daemon=True).start()
+
+        def fail(message):
+            win.destroy()
+            if messagebox.askyesno(APP_NAME, f"The update did not work:\n\n{message}\n\nOpen the download page "
+                                   "to get it by hand?", parent=self.root):
+                webbrowser.open(info["page"])
+
+        def step(item=None):
+            try:
+                while True:
+                    kind, val = results.get_nowait()
+                    if kind == "p":
+                        bar.config(value=val)
+                    elif kind == "err":
+                        return fail(val)
+                    else:
+                        label.config(text="Installing and restarting...")
+                        self.root.update_idletasks()
+                        return self._finish_update(val, info, fail)
+            except queue.Empty:
+                self.root.after(100, step)
+        step()
+
+    def _finish_update(self, path, info, fail):
+        self.commit_now()
+        if self._snap() != self.saved_json and not self.save():     # keep the entries before closing
+            return fail("Your entries could not be saved first, so nothing was changed.")
+        try:
+            updater.install(path, info)
+        except Exception as exc:
+            return fail(str(exc))
+        self.root.after(300, self.root.destroy)
 
     def _on_auto_resize_toggled(self):
         save_settings({"auto_resize": bool(self.auto_resize.get())})
@@ -2085,7 +2283,8 @@ def selftest(out_path):
     """
     import tempfile
     import traceback
-    global _DATA_FILE_OVERRIDE
+    global _DATA_FILE_OVERRIDE, UPDATES_ENABLED
+    UPDATES_ENABLED = False       # the self-test must never go online
     _DATA_FILE_OVERRIDE = os.path.join(tempfile.mkdtemp(), "entries.json")
     msg, code, root = "OK", 0, None
     import faulthandler
@@ -2257,6 +2456,66 @@ def selftest(out_path):
         app.set_zoom(None)
         root.update()
         assert app.manual_zoom is None and app.zoom_var.get() == "Auto" and load_settings().get("zoom") == "auto"
+
+        # --- changelog window, update settings and the update decisions (no network, no dialogs)
+        assert app.check_updates.get() is True and app.auto_install.get() is False, "update setting defaults"
+        got = changelog_lines("# Changelog\n\n## [1.0.0] - x\n\n### Added\n- **Bold** thing\n  continued\n\n[1.0.0]: http://x\n")
+        assert got == [("h2", "[1.0.0] - x"), ("h3", "Added"), ("bullet", "\u2022 Bold thing"), ("cont", "continued")], got
+        try:
+            import changelog_data
+        except ImportError:
+            changelog_data = None
+        if changelog_data is not None:
+            assert changelog_data.CHANGELOG.count("## [") >= 5 and __version__ in changelog_data.CHANGELOG, \
+                "the bundled changelog does not mention this version"
+            app.show_changelog()
+            assert app._changelog_win is not None, "changelog window was not opened"
+            app._changelog_win.destroy()
+            app._changelog_win = None
+        app.check_updates.set(False)
+        app._on_update_settings()
+        assert load_settings().get("check_updates") is False and load_settings().get("zoom") == "auto", \
+            "update setting not saved (or it wiped another setting)"
+        app.check_updates.set(True)
+        app._on_update_settings()
+        assert updater is not None, "updater module missing"
+        assert updater.parse_version("v1.10.0") == (1, 10, 0) and updater.is_newer("1.10.0", "1.9.9")
+        assert updater.asset_name("1.2.3", "Windows-x64") == "ProfitCalculator-v1.2.3-Windows-x64.exe"
+        assert updater.platform_tag() is not None, "no release build is named for this system"
+        real_messagebox, real_open, real_can = messagebox, webbrowser.open, updater.can_self_update
+        said, opened = [], []
+        webbrowser.open = lambda url, *a, **k: opened.append(url)
+        answer = {"ync": False}
+        messagebox = types.SimpleNamespace(
+            showinfo=lambda *a, **k: said.append(("info", a[1])), showerror=lambda *a, **k: said.append(("error", a[1])),
+            askyesno=lambda *a, **k: said.append(("yesno", a[1])) or True,
+            askyesnocancel=lambda *a, **k: said.append(("ync", a[1])) or answer["ync"])
+        try:
+            newer = {"version": "999.0.0", "tag": "v999.0.0", "notes": "- a change", "page": "https://example.test/r",
+                     "assets": {}}
+            app._update_busy = True
+            app._on_update_info(("ok", newer), True)             # not the downloaded app: offers the download page
+            assert opened == ["https://example.test/r"] and not app._update_busy, (opened, said)
+            said.clear()
+            app._on_update_info(("ok", dict(newer, version=__version__)), True)
+            assert said[-1][0] == "info" and "up to date" in said[-1][1], said
+            app._on_update_info(("err", "offline"), True)
+            assert said[-1][0] == "error" and "offline" in said[-1][1], said
+            said.clear()
+            app._on_update_info(("err", "offline"), False)       # automatic checks stay quiet
+            app._on_update_info(("ok", dict(newer, version=__version__)), False)
+            assert not said, said
+            updater.can_self_update = lambda: True               # pretend to be the downloaded app
+            app._on_update_info(("ok", newer), False)            # asks; "No" = skip this version
+            assert said and said[-1][0] == "ync" and load_settings().get("skip_version") == "999.0.0", said
+            said.clear()
+            app._on_update_info(("ok", newer), False)            # skipped: no more questions
+            assert not said, "a skipped version should not ask again"
+            app._on_update_info(("ok", newer), True)             # but a manual check always asks
+            assert said and said[-1][0] == "ync"
+        finally:
+            messagebox, webbrowser.open, updater.can_self_update = real_messagebox, real_open, real_can
+            save_settings({"skip_version": ""})
 
         # --- scroll simulator card
         sc = app.cards[-1]

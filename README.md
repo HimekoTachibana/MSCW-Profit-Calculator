@@ -25,7 +25,7 @@ Current version: see [CHANGELOG.md](CHANGELOG.md).
 
 ## Download (no installs needed)
 
-Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.6.0-Windows-x64.exe`). Python is bundled inside,
+Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.7.0-Windows-x64.exe`). Python is bundled inside,
 so there is nothing else to install.
 
 | System | Download | First launch |
@@ -42,7 +42,7 @@ Linux builds need a normal desktop session (X11 or Wayland) and a reasonably rec
 
 ## Run from source
 
-Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (no other packages). Keep `profit_calculator.py` and `icons_data.py` together.
+Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (no other packages). Keep `profit_calculator.py`, `icons_data.py`, `updater.py` and `changelog_data.py` together (run `python scripts/embed_changelog.py` to refresh the changelog the app shows).
 
 | System | Setup | Run |
 | --- | --- | --- |
@@ -60,6 +60,7 @@ Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (n
 - Zoom: use the toolbar's Zoom box (type `125`, pick a percentage, or use − / +), or Ctrl/Cmd and `+` / `-`; `Auto` (Ctrl/Cmd+0) fits the window.
 - Undo / Redo: Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on macOS). Save: Ctrl+S / Cmd+S.
 - Saved entries load automatically on the next launch.
+- **Settings > What's new** shows the changelog. **Settings > Check for updates now** looks for a newer release; the downloaded apps can install it themselves (checked against the release's SHA-256 first) and restart. Source runs only get a link. Turn the startup check or automatic install on or off in the same menu.
 
 ## Releases
 

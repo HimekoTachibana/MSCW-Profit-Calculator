@@ -9,6 +9,24 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-25
+
+### Added
+- **Settings > What's new (changelog)** opens the full changelog, newest version first. Every
+  download carries the changelog of its own version.
+- **Updates from Settings.** *Check for updates now* looks for a newer release on GitHub. By default
+  the app also checks quietly a few seconds after it starts (turn off with *Check for updates when
+  the app starts*). When a newer version exists you are asked: Yes = download, verify and install
+  it and restart (your entries are saved first), No = skip that version, Cancel = ask again later.
+  *Install updates automatically* skips the question. The download is checked against the
+  release's `SHA256SUMS.txt` and thrown away if it does not match. Only the downloaded apps can
+  update themselves; running from source just offers the download page. Your first update to this
+  version has to be downloaded by hand, since older versions cannot update themselves.
+
+### Changed
+- The release workflow now also runs the updater tests on Windows, macOS and Linux (including a
+  real PowerShell swap of a locked file on Windows) and embeds the changelog before each build.
+
 ## [1.6.0] - 2026-11-25
 
 ### Added
@@ -187,7 +205,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...v1.5.0
