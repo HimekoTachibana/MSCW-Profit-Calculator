@@ -9,6 +9,23 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-25
+
+### Added
+- **Scroll Simulator breakdown by scroll type.** Two new tables under the success table:
+  - *Cost to get N successes*: the cost of the base items, the cost of each scroll type (Chaos,
+    Greater, Intermediate, Lesser) and the total, for 1, 2, 3 ... successes (up to 10 if used).
+  - *Scrolls used to get N successes*: how many of each scroll type that takes.
+  Both start with a "1 item" row showing what a single base item costs and uses on average, so the
+  old "Avg scrolls used" figure is now split by type.
+- **Extra items** column: how many base items beyond the finished one you have to buy (they fail,
+  are destroyed or restart).
+
+### Changed
+- Removed "Avg total cost / item" from the results (it mixed the base item with the scrolls). The
+  base item, each scroll type and the total now have their own columns. The success table's
+  "Avg cost" column moved into the new cost table as "Total".
+
 ## [1.3.2] - 2026-11-25
 
 ### Changed
@@ -143,7 +160,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.2.1...v1.3.0

@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
     icons_data = None
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.3.2"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.4.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_ITEMS = 10
@@ -325,6 +325,7 @@ def scroll_report(d):
     if equip is None:
         return {"error": "Equipment cost is not a valid number."}
     seq = []                                   # (success, destroy, cost each) per scroll, in order
+    kinds_seq = []                             # the scroll type of each of those scrolls
     for i, sec in enumerate(d.get("sections", []), 1):
         count = parse_int(sec.get("count", ""), 0, MAX_SLOTS)
         cost = parse_num(sec.get("cost", ""))
@@ -332,8 +333,10 @@ def scroll_report(d):
             return {"error": f"Scroll row {i}: 'Used' must be a whole number from 0 to {MAX_SLOTS}."}
         if cost is None:
             return {"error": f"Scroll row {i}: cost is not a valid number."}
-        _, success, destroy = SCROLL_KINDS.get(sec.get("kind"), SCROLL_KINDS["intermediate"])
+        kind = sec.get("kind") if sec.get("kind") in SCROLL_KINDS else "intermediate"
+        _, success, destroy = SCROLL_KINDS[kind]
         seq += [(success, destroy, cost)] * count
+        kinds_seq += [kind] * count
     streak = parse_int(d.get("stop_streak", ""), 0, MAX_SLOTS)
     total = parse_int(d.get("stop_total", ""), 0, MAX_SLOTS)
     positions = parse_positions(d.get("stop_at", ""))
@@ -353,17 +356,40 @@ def scroll_report(d):
     finished, destroyed, restarted, used = scroll_sim([(p, q) for p, q, _ in seq], streak, total, positions)
     scroll_cost = sum(cost * u for (_, _, cost), u in zip(seq, used))
     per_item = equip + scroll_cost
+    kinds, by_kind = [], {}                    # per base item: scrolls of each type used, and what they cost
+    for kind, (_, _, cost), u in zip(kinds_seq, seq, used):
+        if kind not in by_kind:
+            by_kind[kind] = {"used": 0.0, "cost": 0.0}
+            kinds.append(kind)
+        by_kind[kind]["used"] += u
+        by_kind[kind]["cost"] += cost * u
+
+    def times(items, x):                       # items may be infinity; 0 stays 0
+        return 0.0 if x == 0 else items * x
+
     rows = []
     for k in range(1, n + 1):
         exact, at_least = finished[k], sum(finished[k:])
         chance = exact if d.get("basis") == "exact" else at_least
         items = 1.0 / chance if chance > 1e-15 else math.inf
         rows.append({"k": k, "exact": exact, "atleast": at_least, "items": items,
-                     "cost": math.inf if items == math.inf else items * per_item})
+                     "extra": items - 1.0,
+                     "cost": math.inf if items == math.inf else items * per_item,
+                     "base": times(items, equip),
+                     "kind_cost": {kd: times(items, by_kind[kd]["cost"]) for kd in kinds},
+                     "kind_used": {kd: times(items, by_kind[kd]["used"]) for kd in kinds}})
     rules = bool(streak or total or (positions & set(range(1, n + 1))))
     return {"n": n, "slots": slots, "zero": finished[0], "destroyed": destroyed, "restarted": restarted,
             "rules": rules, "equip": equip, "scroll_cost": scroll_cost, "per_item": per_item,
-            "avg_used": sum(used), "rows": rows}
+            "avg_used": sum(used), "kinds": kinds, "by_kind": by_kind, "rows": rows}
+
+
+SCROLL_SHORT = {"chaos": "Chaos", "greater": "Greater", "intermediate": "Interm.", "lesser": "Lesser"}
+
+
+def kind_header(kind):
+    """Two-line column heading such as 'Greater' over '10%'."""
+    return f"{SCROLL_SHORT[kind]}\n{round(SCROLL_KINDS[kind][1] * 100)}%"
 
 
 def fmt_chance(p):
@@ -1061,11 +1087,8 @@ class ScrollCard(CardBase):
             grid.columnconfigure(c, weight=1)
         items = (("slots", "Scrolls / slots"), ("avg_used", "Avg scrolls used"),
                  ("destroy", "Chance destroyed"), ("restart", "Chance restarted"),
-                 ("zero", "Chance of 0 successes"), ("scroll_cost", "Avg scroll cost"),
-                 ("per_item", "Avg total cost / item"), (None, None))
+                 ("zero", "Chance of 0 successes"), ("scroll_cost", "Avg scroll cost"))
         for idx, (key, text) in enumerate(items):
-            if key is None:
-                continue
             row, col = divmod(idx, 2)
             c0 = col * 2
             ttk.Label(grid, text=text).grid(row=row, column=c0, sticky="w", pady=1,
@@ -1092,13 +1115,25 @@ class ScrollCard(CardBase):
         self.table.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         for c in range(5):
             self.table.columnconfigure(c, weight=1, uniform="scroll_table")
-        for c, text in enumerate(("Successes", "Exactly", "At least", "Avg items", "Avg cost")):
+        for c, text in enumerate(("Successes", "Exactly", "At least", "Avg items", "Extra items")):
             ttk.Label(self.table, text=text, style="Section.TLabel", anchor="e").grid(
                 row=0, column=c, sticky="e", padx=(0, 6))
         self.table_rows = []
+        self._grids = {}                             # name -> label grid of the breakdown tables
+        self.bd_titles, self.bd_frames = [], {}
+        rr = r + 1
+        for name, title in (("cost", "Cost to get N successes (base items + scrolls)"),
+                            ("used", "Scrolls used to get N successes")):
+            tl = ttk.Label(body, text=title, style="Section.TLabel")
+            tl.grid(row=rr, column=0, columnspan=2, sticky="w", pady=(8, 0))
+            fr = ttk.Frame(body)
+            fr.grid(row=rr + 1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+            self.bd_titles.append(tl)
+            self.bd_frames[name] = fr
+            rr += 2
         self.table_note = ttk.Label(body, text="", style="Muted.TLabel", justify="left",
                                     wraplength=int(300 * app.scale))
-        self.table_note.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.table_note.grid(row=rr, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.notes.append(self.table_note)
         for k in range(1, MAX_SLOTS + 1):
             labels = []
@@ -1107,6 +1142,39 @@ class ScrollCard(CardBase):
                 lbl.grid(row=k, column=c, sticky="e", padx=(0, 6), pady=0)
                 labels.append(lbl)
             self.table_rows.append(labels)
+
+    def _fill_grid(self, name, headers, rows):
+        """Show a small table (headers + rows of text); labels are only rebuilt when its shape changes."""
+        frame = self.bd_frames[name]
+        g = self._grids.get(name)
+        sig = (len(headers), len(rows))
+        if g is None or g["sig"] != sig:
+            for w in frame.winfo_children():
+                w.destroy()
+            for c in range(10):
+                frame.columnconfigure(c, weight=0, uniform="")
+            for c in range(len(headers)):
+                frame.columnconfigure(c, weight=1, uniform="bd_" + name)
+            hdr = []
+            for c in range(len(headers)):
+                lb = ttk.Label(frame, style="Section.TLabel", anchor="e", justify="right")
+                lb.grid(row=0, column=c, sticky="e", padx=(0, 6))
+                hdr.append(lb)
+            cells = []
+            for i in range(len(rows)):
+                line = []
+                for c in range(len(headers)):
+                    lb = ttk.Label(frame, anchor="e")
+                    lb.grid(row=i + 1, column=c, sticky="e", padx=(0, 6))
+                    line.append(lb)
+                cells.append(line)
+            g = self._grids[name] = {"sig": sig, "hdr": hdr, "cells": cells}
+        for lb, text in zip(g["hdr"], headers):
+            lb.config(text=text)
+        for line, texts in zip(g["cells"], rows):
+            for lb, text in zip(line, texts):
+                lb.config(text=text)
+        frame.grid()
 
     def _wheel_passthrough(self, event):
         """Scroll the window instead of changing the list when the wheel is over a drop-down."""
@@ -1258,6 +1326,10 @@ class ScrollCard(CardBase):
             for labels in self.table_rows:
                 for lbl in labels:
                     lbl.grid_remove()
+            for fr in self.bd_frames.values():
+                fr.grid_remove()
+            for tl in self.bd_titles:
+                tl.grid_remove()
             return
         self.msg.config(text="", foreground=MUTED)
         n = rep["n"]
@@ -1267,17 +1339,33 @@ class ScrollCard(CardBase):
         self.sum_lbls["zero"].config(text=fmt_chance(rep["zero"]))
         self.sum_lbls["avg_used"].config(text=f"{rep['avg_used']:.2f}")
         self.sum_lbls["scroll_cost"].config(text=fmt_money(rep["scroll_cost"]))
-        self.sum_lbls["per_item"].config(text=fmt_money(rep["per_item"]))
         basis = "exactly" if self.basis.get() == "exact" else "at least"
         self.table_note.config(text=(
-            f"Avg items = items you buy on average to get one with {basis} that many successes; "
-            "Avg cost adds the scrolls used."
-            + (" Restarted and destroyed items count as misses." if rep["rules"] or rep["destroyed"] > 0 else "")))
+            f"Avg items = base items you buy on average to get one with {basis} that many successes, "
+            "counting the finished one; Extra items = the others, which fail"
+            + (", are destroyed or restart" if rep["rules"] or rep["destroyed"] > 0 else "")
+            + ". The tables above price those items and the scrolls used on all of them."))
+        for tl in self.bd_titles:
+            tl.grid()
+        kinds = rep["kinds"]
+        per = rep["by_kind"]
+        head_cost = ["Successes", "Base items"] + [kind_header(k) for k in kinds] + ["Total"]
+        rows_cost = [["1 item", short_num(rep["equip"])] + [short_num(per[k]["cost"]) for k in kinds]
+                     + [short_num(rep["per_item"])]]
+        head_used = ["Successes"] + [kind_header(k) for k in kinds] + ["All scrolls"]
+        rows_used = [["1 item"] + [fmt_items(per[k]["used"]) for k in kinds] + [fmt_items(rep["avg_used"])]]
+        for row in rep["rows"]:
+            rows_cost.append([str(row["k"]), short_num(row["base"])]
+                             + [short_num(row["kind_cost"][k]) for k in kinds] + [short_num(row["cost"])])
+            rows_used.append([str(row["k"])] + [fmt_items(row["kind_used"][k]) for k in kinds]
+                             + [fmt_items(sum(row["kind_used"].values()))])
+        self._fill_grid("cost", head_cost, rows_cost)
+        self._fill_grid("used", head_used, rows_used)
         for i, labels in enumerate(self.table_rows):
             if i < n:
                 row = rep["rows"][i]
                 texts = (str(row["k"]), fmt_chance(row["exact"]), fmt_chance(row["atleast"]),
-                         fmt_items(row["items"]), short_num(row["cost"]))
+                         fmt_items(row["items"]), fmt_items(row["extra"]))
                 for lbl, text in zip(labels, texts):
                     lbl.config(text=text)
                     lbl.grid()
@@ -2138,6 +2226,19 @@ def selftest(out_path):
         root.update()
         assert abs(sc.report["restarted"] - 0.45) < 1e-9, "wrong restart chance: %r" % (sc.report,)
         assert sc.sum_lbls["restart"].cget("text") == "45.00%", sc.sum_lbls["restart"].cget("text")
+        # cost / usage breakdown by scroll type: base + each scroll type adds up to the total
+        rp = scroll_report({"slots": "", "equip_cost": "20000", "basis": "atleast", "stop_at": "1, 2",
+                            "sections": [{"kind": "greater", "count": "1", "cost": "100000"},
+                                         {"kind": "intermediate", "count": "4", "cost": "300000"}]})
+        assert rp["kinds"] == ["greater", "intermediate"]
+        assert abs(rp["by_kind"]["greater"]["used"] - 1.0) < 1e-9
+        assert abs(rp["by_kind"]["intermediate"]["used"] - 0.28) < 1e-9, rp["by_kind"]
+        for rw in rp["rows"]:
+            tot = rw["base"] + sum(rw["kind_cost"].values())
+            assert abs(tot - rw["cost"]) < 1e-6 * max(1.0, rw["cost"]), (rw["k"], tot, rw["cost"])
+            assert abs(rw["base"] - rw["items"] * 20000) < 1e-6 * max(1.0, rw["base"])
+            assert abs(rw["extra"] - (rw["items"] - 1.0)) < 1e-9
+        assert sc.bd_frames["cost"].winfo_children(), "breakdown table was not built"
         sc.stop_at.set("0")
         root.update()
         assert "Restart rule" in sc.msg.cget("text"), "a bad scroll number should be reported"
