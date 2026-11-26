@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
     icons_data = None
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.5.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.5.1"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
 MAX_MATERIALS = 5
@@ -1121,7 +1121,7 @@ class ScrollCard(CardBase):
         place(self.table, sticky="ew", pady=(4, 0))
         for c in range(5):
             self.table.columnconfigure(c, weight=1, uniform="scroll_table")
-        for c, text in enumerate(("Successes", "Exactly", "At least", "Avg items", "Extra items")):
+        for c, text in enumerate(("Successes", "Exactly", "At least", "Base items", "Duplicates")):
             ttk.Label(self.table, text=text, style="Section.TLabel", anchor="e").grid(
                 row=0, column=c, sticky="e", padx=(0, 6))
         self.table_rows = []
@@ -1364,10 +1364,10 @@ class ScrollCard(CardBase):
         self.sum_lbls["scroll_cost"].config(text=fmt_money(rep["scroll_cost"]))
         basis = "exactly" if self.basis.get() == "exact" else "at least"
         self.table_note.config(text=(
-            f"Avg items = base items you buy on average to get one with {basis} that many successes, "
-            "counting the finished one; Extra items = the others, which fail"
+            f"Base items = copies of the base item you buy on average to get one with {basis} that many "
+            "successes (counting the finished one); Duplicates = the others, which fail"
             + (", are destroyed or restart" if rep["rules"] or rep["destroyed"] > 0 else "")
-            + ". The tables above price those items and the scrolls used on all of them."))
+            + ". The tables above price those copies and the scrolls used on all of them."))
         for tl in self.bd_titles:
             tl.grid()
         kinds = rep["kinds"]
@@ -1375,12 +1375,12 @@ class ScrollCard(CardBase):
         head_cost = ["Successes", "Base items"] + [kind_header(k) for k in kinds] + ["Total"]
         rows_cost = [["1 item", short_num(rep["equip"])] + [short_num(per[k]["cost"]) for k in kinds]
                      + [short_num(rep["per_item"])]]
-        head_used = ["Successes"] + [kind_header(k) for k in kinds] + ["All scrolls"]
-        rows_used = [["1 item"] + [fmt_items(per[k]["used"]) for k in kinds] + [fmt_items(rep["avg_used"])]]
+        head_used = ["Successes", "Base items"] + [kind_header(k) for k in kinds] + ["All scrolls"]
+        rows_used = [["1 item", "1"] + [fmt_items(per[k]["used"]) for k in kinds] + [fmt_items(rep["avg_used"])]]
         for row in rep["rows"]:
             rows_cost.append([str(row["k"]), short_num(row["base"])]
                              + [short_num(row["kind_cost"][k]) for k in kinds] + [short_num(row["cost"])])
-            rows_used.append([str(row["k"])] + [fmt_items(row["kind_used"][k]) for k in kinds]
+            rows_used.append([str(row["k"]), fmt_items(row["items"])] + [fmt_items(row["kind_used"][k]) for k in kinds]
                              + [fmt_items(sum(row["kind_used"].values()))])
         self._fill_grid("cost", head_cost, rows_cost)
         self._fill_grid("used", head_used, rows_used)

@@ -9,6 +9,14 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-25
+
+### Changed
+- Scroll Simulator: how many copies of the base item you need is now spelled out. The success
+  table's columns are **Base items** (copies bought on average, including the finished one) and
+  **Duplicates** (the others), and the "Scrolls used" table gets a **Base items** column next to
+  the scroll counts, so each success count shows the base items and the scrolls of each type side by side.
+
 ## [1.5.0] - 2026-11-25
 
 ### Changed
@@ -170,7 +178,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.1...v1.3.2
