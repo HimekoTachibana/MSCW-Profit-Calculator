@@ -2501,6 +2501,7 @@ def selftest(out_path):
         try:
             newer = {"version": "999.0.0", "tag": "v999.0.0", "notes": "- a change", "page": "https://example.test/r",
                      "assets": {}}
+            updater.can_self_update = lambda: False              # a built app would say True here
             app._update_busy = True
             app._on_update_info(("ok", newer), True)             # not the downloaded app: offers the download page
             assert opened == ["https://example.test/r"] and not app._update_busy, (opened, said)
