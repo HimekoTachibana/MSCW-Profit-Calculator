@@ -3,7 +3,7 @@
 Profit Calculator
 =================
 Quickly work out profit when buying, crafting and selling items.
-Starts with one item; add up to 10.
+Starts with one item; add as many as you like.
 
 Runs on Windows, macOS and Linux (CachyOS/Arch) using only Python's
 built-in Tkinter - nothing to pip install.
@@ -47,10 +47,9 @@ except Exception:  # pragma: no cover
     icons_data = None
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.4.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.5.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "Profit Calculator"
-MAX_ITEMS = 10
 MAX_MATERIALS = 5
 TAX_CHOICES = ("3%", "5%")
 BASE_CARD_W = 340
@@ -543,6 +542,11 @@ def _bumped(base_font, delta):
 # --------------------------------------------------------------------------- #
 class CardBase(ttk.Frame):
     kind_label = "Item"          # the title reads "<kind_label> <number>"
+    wide_capable = False         # True: may spread over two columns (see ScrollCard)
+    span = 1                     # columns the card covers right now
+
+    def set_wide(self, wide):
+        """Called by the layout; only cards that are wide_capable change their look."""
 
     def __init__(self, parent, app, index):
         super().__init__(parent, padding=(12, 10), relief="groove", borderwidth=2)
@@ -1010,62 +1014,67 @@ class ScrollCard(CardBase):
         self._build_header()
 
         body = ttk.Frame(self)
-        body.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-        body.columnconfigure(1, weight=1)
-        r = 0
+        body.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        self.body = body
+        left, right = ttk.Frame(body), ttk.Frame(body)   # inputs + results | tables
+        self.left, self.right = left, right
+        self.vsep = ttk.Separator(body, orient="vertical")
+        for f in (left, right):
+            f.columnconfigure(1, weight=1)
+        left.grid(row=0, column=0, sticky="nsew")
+        right.grid(row=1, column=0, sticky="nsew", pady=(8, 0))   # narrow layout: tables underneath
+        self.wide, self.span = False, 1
+        cur = {"f": left, "r": 0}                        # the frame and row being filled
 
         def field(text, var, kind):
-            nonlocal r
-            ttk.Label(body, text=text).grid(row=r, column=0, sticky="w", pady=2, padx=(0, 8))
-            self._entry(body, var, kind).grid(row=r, column=1, sticky="ew", pady=2)
-            r += 1
+            f, r = cur["f"], cur["r"]
+            ttk.Label(f, text=text).grid(row=r, column=0, sticky="w", pady=2, padx=(0, 8))
+            self._entry(f, var, kind).grid(row=r, column=1, sticky="ew", pady=2)
+            cur["r"] += 1
 
         def note(text):
-            nonlocal r
-            lbl = ttk.Label(body, text=text, style="Muted.TLabel", justify="left",
+            lbl = ttk.Label(cur["f"], text=text, style="Muted.TLabel", justify="left",
                             wraplength=int(300 * app.scale))
-            lbl.grid(row=r, column=0, columnspan=2, sticky="w")
+            lbl.grid(row=cur["r"], column=0, columnspan=2, sticky="w")
             self.notes.append(lbl)
-            r += 1
+            cur["r"] += 1
 
         def sep():
-            nonlocal r
-            ttk.Separator(body).grid(row=r, column=0, columnspan=2, sticky="ew", pady=4)
-            r += 1
+            ttk.Separator(cur["f"]).grid(row=cur["r"], column=0, columnspan=2, sticky="ew", pady=4)
+            cur["r"] += 1
 
         def section(text):
-            nonlocal r
-            ttk.Label(body, text=text, style="Section.TLabel").grid(
-                row=r, column=0, columnspan=2, sticky="w", pady=(0, 3))
-            r += 1
+            ttk.Label(cur["f"], text=text, style="Section.TLabel").grid(
+                row=cur["r"], column=0, columnspan=2, sticky="w", pady=(0, 3))
+            cur["r"] += 1
+
+        def place(widget, **kw):
+            widget.grid(row=cur["r"], column=0, columnspan=2, **kw)
+            cur["r"] += 1
 
         self.notes = []
         field("Equipment", self.nick, "text")
-        pair = ttk.Frame(body)                       # cost and slots share one line
-        pair.grid(row=r, column=0, columnspan=2, sticky="ew", pady=1)
+        pair = ttk.Frame(left)                       # cost and slots share one line
         pair.columnconfigure(1, weight=1)
         ttk.Label(pair, text="Cost").grid(row=0, column=0, sticky="w", padx=(0, 8))
         self._entry(pair, self.equip, "cost").grid(row=0, column=1, sticky="ew")
         ttk.Label(pair, text=f"Slots (0-{MAX_SLOTS}, blank = auto)").grid(row=0, column=2, sticky="w", padx=(12, 8))
         self._entry(pair, self.slots, "int", width=4).grid(row=0, column=3)
-        r += 1
+        place(pair, sticky="ew", pady=1)
         sep()
 
-        self.sec_head = ttk.Frame(body)              # "Scrolls used" with the add button on the same line
-        self.sec_head.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+        self.sec_head = ttk.Frame(left)              # "Scrolls used" with the add button on the same line
         self.sec_head.columnconfigure(0, weight=1)
         ttk.Label(self.sec_head, text="Scrolls used", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         self.add_btn = None
-        r += 1
-        self.sec_frame = ttk.Frame(body)
-        self.sec_frame.grid(row=r, column=0, columnspan=2, sticky="ew")
-        r += 1
+        place(self.sec_head, sticky="ew", pady=(0, 2))
+        self.sec_frame = ttk.Frame(left)
+        place(self.sec_frame, sticky="ew")
         note("Used top to bottom; every scroll uses 1 slot, pass or fail.")
         sep()
 
         section("Restart with a new item when")
-        rs = ttk.Frame(body)
-        rs.grid(row=r, column=0, columnspan=2, sticky="ew")
+        rs = ttk.Frame(left)
         rs.columnconfigure(1, weight=1)
         rs.columnconfigure(3, weight=1)
         ttk.Label(rs, text="Fails in a row").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
@@ -1075,14 +1084,13 @@ class ScrollCard(CardBase):
         ttk.Label(rs, text="Any of these scrolls fails (e.g. 1, 2 or 1-3)").grid(
             row=1, column=0, columnspan=3, sticky="w", pady=1)
         self._entry(rs, self.stop_at, "list", width=8).grid(row=1, column=3, sticky="ew", pady=1)
-        r += 1
+        place(rs, sticky="ew")
         note("Blank = never restart. Restarting stops scrolling that item and starts a new one.")
         sep()
 
         section("Results")
         self.sum_lbls = {}
-        grid = ttk.Frame(body)                       # two columns of label + value
-        grid.grid(row=r, column=0, columnspan=2, sticky="ew")
+        grid = ttk.Frame(left)                       # two columns of label + value
         for c in (1, 3):
             grid.columnconfigure(c, weight=1)
         items = (("slots", "Scrolls / slots"), ("avg_used", "Avg scrolls used"),
@@ -1096,23 +1104,21 @@ class ScrollCard(CardBase):
             lbl = ttk.Label(grid, text="\u2014", anchor="e")
             lbl.grid(row=row, column=c0 + 1, sticky="e", pady=1)
             self.sum_lbls[key] = lbl
-        r += 1
-        self.msg = ttk.Label(body, text="", justify="left", wraplength=int(300 * app.scale))
-        self.msg.grid(row=r, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        r += 1
-        sep()
+        place(grid, sticky="ew")
+        self.msg = ttk.Label(left, text="", justify="left", wraplength=int(300 * app.scale))
+        place(self.msg, sticky="w", pady=(2, 0))
 
-        head = ttk.Frame(body)                       # title, then the exact/at-least choice on one line
-        head.grid(row=r, column=0, columnspan=2, sticky="ew")
+        cur["f"], cur["r"] = right, 0                # ---- right half: the tables
+        head = ttk.Frame(right)                      # title, then the exact/at-least choice on one line
         ttk.Label(head, text="Successes", style="Section.TLabel").pack(side="left")
         ttk.Radiobutton(head, text="Avg for exactly N", value="exact", variable=self.basis).pack(
             side="right")
         ttk.Radiobutton(head, text="Avg for at least N", value="atleast", variable=self.basis).pack(
             side="right", padx=(0, 10))
-        r += 1
+        place(head, sticky="ew")
 
-        self.table = ttk.Frame(body)
-        self.table.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.table = ttk.Frame(right)
+        place(self.table, sticky="ew", pady=(4, 0))
         for c in range(5):
             self.table.columnconfigure(c, weight=1, uniform="scroll_table")
         for c, text in enumerate(("Successes", "Exactly", "At least", "Avg items", "Extra items")):
@@ -1121,19 +1127,17 @@ class ScrollCard(CardBase):
         self.table_rows = []
         self._grids = {}                             # name -> label grid of the breakdown tables
         self.bd_titles, self.bd_frames = [], {}
-        rr = r + 1
         for name, title in (("cost", "Cost to get N successes (base items + scrolls)"),
                             ("used", "Scrolls used to get N successes")):
-            tl = ttk.Label(body, text=title, style="Section.TLabel")
-            tl.grid(row=rr, column=0, columnspan=2, sticky="w", pady=(8, 0))
-            fr = ttk.Frame(body)
-            fr.grid(row=rr + 1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+            tl = ttk.Label(right, text=title, style="Section.TLabel")
+            place(tl, sticky="w", pady=(8, 0))
+            fr = ttk.Frame(right)
+            place(fr, sticky="ew", pady=(2, 0))
             self.bd_titles.append(tl)
             self.bd_frames[name] = fr
-            rr += 2
-        self.table_note = ttk.Label(body, text="", style="Muted.TLabel", justify="left",
+        self.table_note = ttk.Label(right, text="", style="Muted.TLabel", justify="left",
                                     wraplength=int(300 * app.scale))
-        self.table_note.grid(row=rr, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        place(self.table_note, sticky="w", pady=(4, 0))
         self.notes.append(self.table_note)
         for k in range(1, MAX_SLOTS + 1):
             labels = []
@@ -1142,6 +1146,25 @@ class ScrollCard(CardBase):
                 lbl.grid(row=k, column=c, sticky="e", padx=(0, 6), pady=0)
                 labels.append(lbl)
             self.table_rows.append(labels)
+
+    wide_capable = True
+
+    def set_wide(self, wide):
+        """Two halves side by side when the layout gives this card two columns, else stacked."""
+        if wide == self.wide:
+            return
+        self.wide, self.span = wide, 2 if wide else 1
+        if wide:
+            self.body.columnconfigure(0, weight=1, uniform="halves")
+            self.body.columnconfigure(2, weight=1, uniform="halves")
+            self.left.grid(row=0, column=0, sticky="nsew")
+            self.vsep.grid(row=0, column=1, sticky="ns", padx=10)
+            self.right.grid(row=0, column=2, columnspan=1, sticky="nsew", pady=0)
+        else:
+            self.vsep.grid_remove()
+            self.body.columnconfigure(0, weight=1, uniform="")
+            self.body.columnconfigure(2, weight=0, uniform="")
+            self.right.grid(row=1, column=0, columnspan=1, sticky="nsew", pady=(8, 0))
 
     def _fill_grid(self, name, headers, rows):
         """Show a small table (headers + rows of text); labels are only rebuilt when its shape changes."""
@@ -1630,7 +1653,7 @@ class App:
         """(width, height) one item needs at the current zoom, including the gap around it."""
         self.root.update_idletasks()
         gap = int(16 * self.scale)
-        return (max(c.winfo_reqwidth() for c in self.cards) + gap,
+        return (int(max((c.winfo_reqwidth() + gap) / c.span for c in self.cards)),
                 max(c.winfo_reqheight() for c in self.cards) + gap)
 
     def _apply_zoom(self, z):
@@ -1677,15 +1700,16 @@ class App:
             changed = self._apply_zoom(self.manual_zoom)
             self._measure()
             self._set_minsize()
-            cols = max(1, min(n, W // self.cw))
+            cols = max(1, min(self._units(), W // self.cw))
             if changed or cols != self._cols:
                 self._layout_cards(force=True, cols=cols)
             return
         cw, ch = self._card_extent()
         cw1, ch1 = cw / self.zoom, ch / self.zoom      # size of one item at zoom 1.0
         best = None
-        for cols in range(1, n + 1):
-            rows = -(-n // cols)
+        units = self._units()
+        for cols in range(1, units + 1):
+            rows = self._flow_rows(cols)
             s = min(W / (cols * cw1), H / (rows * ch1))
             if best is None or (s, -rows) > best:
                 best = (s, -rows)
@@ -1697,7 +1721,7 @@ class App:
             # Too many items to show at a readable size: keep the text readable, use as many
             # columns as fit at that size, and let the window scroll vertically.
             want_cols = 1
-            for cols in range(n, 0, -1):
+            for cols in range(units, 0, -1):
                 if W / (cols * cw1) >= COMFORT_ZOOM:
                     want_cols = cols
                     break
@@ -1708,12 +1732,12 @@ class App:
         for _ in range(5):                              # fonts come in whole pixels: verify and nudge
             changed = self._apply_zoom(z) or changed
             cw, ch = self._card_extent()
-            cols = max(1, min(n, W // cw))
+            cols = max(1, min(units, W // cw))
             if want_cols is not None:
                 cols = max(1, min(want_cols, cols))
                 if W >= cols * cw or z <= ZOOM_MIN + 0.01:
                     break
-            elif -(-n // cols) * ch <= H or z <= ZOOM_MIN + 0.01:
+            elif self._flow_rows(cols) * ch <= H or z <= ZOOM_MIN + 0.01:
                 break
             z = max(ZOOM_MIN, z * 0.94)
         self._measure()
@@ -1777,7 +1801,7 @@ class App:
         sb_w = self.vscroll.winfo_reqwidth()
         pad = int(8 * self.scale)
         max_cols = max(1, (sw - 80 - sb_w - pad) // self.cw)
-        cols = max(1, min(len(self.cards), max_cols))
+        cols = max(1, min(self._units(), max_cols))
         self._layout_cards(force=True, cols=cols)
         self.root.update_idletasks()
         min_h = int(420 * self.scale)
@@ -1788,26 +1812,47 @@ class App:
         self.root.geometry(f"{w}x{h}")
 
     # ---- layout ----------------------------------------------------------- #
+    def _units(self):
+        """How many single-item columns all items need side by side (a wide card counts for two)."""
+        return sum(2 if c.wide_capable else 1 for c in self.cards)
+
+    def _flow(self, cols):
+        """[(row, column, columnspan)] for each item when `cols` columns are available."""
+        out, row, col = [], 0, 0
+        for c in self.cards:
+            span = min(2, cols) if c.wide_capable else 1
+            if col + span > cols:
+                row, col = row + 1, 0
+            out.append((row, col, span))
+            col += span
+        return out
+
+    def _flow_rows(self, cols):
+        flow = self._flow(cols)
+        return flow[-1][0] + 1 if flow else 0
+
     def _measure(self):
         self.root.update_idletasks()
         if self.cards:
-            widest = max(c.winfo_reqwidth() for c in self.cards)
-            self.cw = max(int(BASE_CARD_W * self.scale), widest + int(20 * self.scale))
+            widest = max((c.winfo_reqwidth() + int(20 * self.scale)) / c.span for c in self.cards)
+            self.cw = max(int(BASE_CARD_W * self.scale), int(widest))
 
     def _layout_cards(self, force=False, cols=None):
         if not self.cards:
             return
         if cols is None:
             width = self.canvas.winfo_width()
-            cols = max(1, min(len(self.cards), width // self.cw))
+            cols = max(1, min(self._units(), width // self.cw))
         if cols == self._cols and not force:
             return
         self._cols = cols
-        for c in range(MAX_ITEMS):
+        self._cfg_cols = max(getattr(self, "_cfg_cols", 0), cols)
+        for c in range(self._cfg_cols):
             self.inner.grid_columnconfigure(c, weight=1 if c < cols else 0,
                                             uniform="cards" if c < cols else "")
-        for i, card in enumerate(self.cards):
-            card.grid(row=i // cols, column=i % cols, padx=8, pady=8, sticky="nsew")
+        for card, (row, col, span) in zip(self.cards, self._flow(cols)):
+            card.set_wide(span > 1)                  # the Scroll Simulator spreads over two columns when it can
+            card.grid(row=row, column=col, columnspan=span, padx=8, pady=8, sticky="nsew")
 
     def _on_canvas_configure(self, e):
         self.canvas.itemconfigure(self.win, width=e.width)
@@ -1868,7 +1913,7 @@ class App:
             items = state.get("items") if isinstance(state, dict) else None
             if not isinstance(items, list) or not items:
                 items = [copy.deepcopy(DEFAULT_STATE)]
-            for i, it in enumerate(items[:MAX_ITEMS]):
+            for i, it in enumerate(items):
                 self.cards.append(make_card(self.inner, self, i, sanitize_card(it)))
             self._renumber()
             self._measure()
@@ -1930,9 +1975,7 @@ class App:
         self.undo_btn.state(["!disabled" if can_undo else "disabled"])
         self.redo_btn.state(["!disabled" if can_redo else "disabled"])
         n = len(self.cards)
-        self.add_btn.config(text=f"+ Add Item ({n}/{MAX_ITEMS})")
-        self.add_btn.state(["disabled" if n >= MAX_ITEMS else "!disabled"])
-        self.add_scroll_btn.state(["disabled" if n >= MAX_ITEMS else "!disabled"])
+        self.add_btn.config(text=f"+ Add Item ({n})")
         if dirty:
             self.status.config(text="● Unsaved changes", foreground=AMBER)
         else:
@@ -1940,8 +1983,6 @@ class App:
 
     # ---- items ------------------------------------------------------------ #
     def add_card(self, kind="profit"):
-        if len(self.cards) >= MAX_ITEMS:
-            return
         self.commit_now()
         card = make_card(self.inner, self, len(self.cards), default_state(kind))
         self.cards.append(card)
@@ -2052,11 +2093,11 @@ def selftest(out_path):
         app.auto_resize.set(True)       # the checks below are about resizing
         root.update()
         x0, y0, w0 = root.winfo_x(), root.winfo_y(), root.winfo_width()
-        for _ in range(MAX_ITEMS - 1):
+        for _ in range(11):             # there is no limit on the number of items
             app.add_card()
         root.update()
-        assert len(app.cards) == MAX_ITEMS, f"should allow up to {MAX_ITEMS} items"
-        assert not app.add_btn.instate(["!disabled"]), f"add button should disable at {MAX_ITEMS} items"
+        assert len(app.cards) == 12, "items should not be limited"
+        assert app.add_btn.instate(["!disabled"]), "add button should stay enabled"
         if sys.platform != "darwin":    # macOS may nudge a window below the menu bar
             assert abs(root.winfo_x() - x0) <= 4 and abs(root.winfo_y() - y0) <= 4, "window moved while resizing"
         if root.winfo_screenwidth() >= 2 * app.cw + 160:
@@ -2133,7 +2174,7 @@ def selftest(out_path):
 
 
         app.remove_card(app.cards[-1])
-        assert len(app.cards) == MAX_ITEMS - 1, "remove item failed"
+        assert len(app.cards) == 11, "remove item failed"
         while len(app.cards) > 2:       # few items, so the zoom range is wide enough to measure
             app.remove_card(app.cards[-1])
         for _ in range(20):             # let the pause after an automatic resize end

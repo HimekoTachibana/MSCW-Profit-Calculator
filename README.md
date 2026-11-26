@@ -1,6 +1,6 @@
 # MSCW Profit Calculator
 
-Quickly work out profit when buying, crafting and selling items. Compare up to 10 items at once,
+Quickly work out profit when buying, crafting and selling items. Compare as many items as you like,
 include scroll and material costs, apply 3% or 5% tax, and type in a sale price, a profit or a
 profit % - the other two are worked out for you. A small picture beside the profit % shows how good the
 profit is:
@@ -25,7 +25,7 @@ Current version: see [CHANGELOG.md](CHANGELOG.md).
 
 ## Download (no installs needed)
 
-Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.4.0-Windows-x64.exe`). Python is bundled inside,
+Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.5.0-Windows-x64.exe`). Python is bundled inside,
 so there is nothing else to install.
 
 | System | Download | First launch |

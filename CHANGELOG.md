@@ -9,6 +9,16 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-25
+
+### Changed
+- **No limit on the number of items.** The 10-item cap is gone; the button now just shows how
+  many items you have, e.g. "+ Add Item (12)".
+- **The Scroll Simulator now takes the space of two item cards** when the window has room: inputs
+  and results on the left, the success, cost and scroll tables on the right, so it is about as tall
+  as a normal item. In a narrow window (one column) it stacks as before. Zoom, auto-fit, window
+  resizing and reordering all account for the wider card.
+
 ## [1.4.0] - 2026-11-25
 
 ### Added
@@ -160,7 +170,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.0...v1.3.1
