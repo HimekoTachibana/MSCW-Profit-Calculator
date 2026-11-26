@@ -10,7 +10,7 @@ Everything below can be done in the browser on GitHub.
 
 ## 1. Prepare the version (edit files on GitHub, commit to `main`)
 
-1. In `profit_calculator.py`, change `__version__` (for example to `"1.1.0"`).
+1. In `mscw_merchant_simulator.py`, change `__version__` (for example to `"1.1.0"`).
 2. In `CHANGELOG.md`, rename the `## [Unreleased]` entries into a new `## [1.1.0] - YYYY-MM-DD`
    section (use **Added**, **Changed**, **Fixed**, **Removed** headings), leave a fresh empty
    `## [Unreleased]` above it, and add the compare link at the bottom.
@@ -21,7 +21,7 @@ Everything below can be done in the browser on GitHub.
 2. Click **Run workflow**, keep the branch on **main**, and tick **Publish a GitHub release**.
 3. Click the green **Run workflow** button.
 
-The workflow reads the version from `profit_calculator.py`, checks that `CHANGELOG.md` has an entry
+The workflow reads the version from `mscw_merchant_simulator.py`, checks that `CHANGELOG.md` has an entry
 for it and that the tag does not exist yet, builds standalone apps (Windows x64, macOS Apple Silicon
 + Intel, Linux x64 + arm64), starts each built app with `--selftest`, and only then creates the tag
 `v<version>` and publishes the release. The release notes are that version's changelog section, and
@@ -53,6 +53,6 @@ release notes: `python scripts/release_notes.py v1.1.0`.
 ## How in-app updates find a release
 
 The app asks GitHub for the repository's *latest* release and looks for the file named
-`ProfitCalculator-v<version>-<system>.<ext>` plus `SHA256SUMS.txt`. The workflow produces exactly
+`MSCW-Merchant-Simulator-v<version>-<system>.<ext>` plus `SHA256SUMS.txt`. The workflow produces exactly
 those names, so do not rename release files by hand. Draft and pre-releases are not offered.
 `python tests/test_updater.py` checks the logic locally.

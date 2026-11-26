@@ -1,4 +1,4 @@
-"""Update checking and self-update for the downloaded (PyInstaller) builds of Profit Calculator.
+"""Update checking and self-update for the downloaded (PyInstaller) builds of MSCW Merchant Simulator.
 
 Pure Python, no Tk, so it can be tested on its own. The flow is:
 
@@ -28,7 +28,7 @@ REPO = "HimekoTachibana/MSCW-Profit-Calculator"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 DOWNLOAD_PREFIX = f"https://github.com/{REPO}/releases/download/"
-APP = "ProfitCalculator"
+APP = "MSCW-Merchant-Simulator"
 SUMS_NAME = "SHA256SUMS.txt"
 
 
@@ -68,7 +68,7 @@ def platform_tag(system=None, machine=None):
 
 
 def asset_name(version, tag):
-    """ProfitCalculator-v1.6.0-Windows-x64.exe, ...-macOS-Intel.zip, ...-Linux-x64.tar.gz"""
+    """MSCW-Merchant-Simulator-v1.6.0-Windows-x64.exe, ...-macOS-Intel.zip, ...-Linux-x64.tar.gz"""
     ext = ".exe" if tag.startswith("Windows") else ".zip" if tag.startswith("macOS") else ".tar.gz"
     return f"{APP}-v{version}-{tag}{ext}"
 
@@ -293,7 +293,7 @@ def install(archive, info):
                 "-WindowStyle", "Hidden", "-File", ps1],
                creationflags=0x08000000 | 0x00000008 | 0x00000200)   # no window, detached, own group
     elif system == "Darwin":
-        app = os.path.dirname(os.path.dirname(os.path.dirname(exe)))     # .../ProfitCalculator.app
+        app = os.path.dirname(os.path.dirname(os.path.dirname(exe)))     # .../MSCW-Merchant-Simulator.app
         if not app.endswith(".app"):
             raise UpdateError("Could not find the app folder to replace.")
         if not _writable_dir(os.path.dirname(app)):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Profit Calculator
+MSCW Merchant Simulator
 =================
 Quickly work out profit when buying, crafting and selling items.
 Starts with one item; add as many as you like.
@@ -11,12 +11,12 @@ built-in Tkinter - nothing to pip install.
 How to run
 ----------
 Windows : install Python 3 from python.org (Tcl/Tk is included), then
-          double-click this file or run:  python profit_calculator.py
-          (rename to profit_calculator.pyw to hide the console window)
+          double-click this file or run:  python mscw_merchant_simulator.py
+          (rename to mscw_merchant_simulator.pyw to hide the console window)
 macOS   : install Python 3 from python.org (Homebrew users: brew install python-tk)
-          python3 profit_calculator.py
+          python3 mscw_merchant_simulator.py
 CachyOS : sudo pacman -S python tk
-          python profit_calculator.py
+          python mscw_merchant_simulator.py
 
 Tips
 ----
@@ -57,9 +57,9 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.7.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.8.0"   # single source of truth - keep in sync with CHANGELOG.md
 
-APP_NAME = "Profit Calculator"
+APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5
 TAX_CHOICES = ("3%", "5%")
 BASE_CARD_W = 340
@@ -495,7 +495,15 @@ def data_file():
         base = os.path.expanduser("~/Library/Application Support")
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return os.path.join(base, "ProfitCalculator", "entries.json")
+    new = os.path.join(base, "MSCW Merchant Simulator")
+    old = os.path.join(base, "ProfitCalculator")          # folder used before the rename (v1.7.0 and older)
+    if not os.path.isdir(new) and os.path.isdir(old):
+        try:                                              # keep the user's saved cards and settings
+            import shutil
+            shutil.copytree(old, new)
+        except OSError:
+            pass
+    return os.path.join(new, "entries.json")
 
 
 def settings_file():
@@ -2480,7 +2488,7 @@ def selftest(out_path):
         app._on_update_settings()
         assert updater is not None, "updater module missing"
         assert updater.parse_version("v1.10.0") == (1, 10, 0) and updater.is_newer("1.10.0", "1.9.9")
-        assert updater.asset_name("1.2.3", "Windows-x64") == "ProfitCalculator-v1.2.3-Windows-x64.exe"
+        assert updater.asset_name("1.2.3", "Windows-x64") == "MSCW-Merchant-Simulator-v1.2.3-Windows-x64.exe"
         assert updater.platform_tag() is not None, "no release build is named for this system"
         real_messagebox, real_open, real_can = messagebox, webbrowser.open, updater.can_self_update
         said, opened = [], []
@@ -2632,7 +2640,7 @@ def main():
         try:
             import ctypes
             try:  # lets Windows show our own icon on the taskbar instead of Python's
-                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HimekoTachibana.ProfitCalculator")
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HimekoTachibana.MSCWMerchantSimulator")
             except Exception:
                 pass
             try:

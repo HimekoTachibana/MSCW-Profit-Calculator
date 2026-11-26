@@ -19,11 +19,11 @@ assert u.parse_version("v1.6.0")==(1,6,0) and u.parse_version("1.10.2")==(1,10,2
 assert u.is_newer("1.10.0","1.9.9") and not u.is_newer("1.6.0","1.6.0") and not u.is_newer("1.5.9","1.6.0") and not u.is_newer("junk","1.0.0")
 for (s,m),exp in {("Windows","AMD64"):"Windows-x64",("Windows","ARM64"):None,("Darwin","arm64"):"macOS-AppleSilicon",("Darwin","x86_64"):"macOS-Intel",("Linux","x86_64"):"Linux-x64",("Linux","aarch64"):"Linux-arm64",("FreeBSD","x86_64"):None}.items():
     assert u.platform_tag(s,m)==exp,(s,m)
-assert u.asset_name("1.6.0","Windows-x64")=="ProfitCalculator-v1.6.0-Windows-x64.exe"
-assert u.asset_name("1.6.0","macOS-Intel")=="ProfitCalculator-v1.6.0-macOS-Intel.zip"
-assert u.asset_name("1.6.0","Linux-arm64")=="ProfitCalculator-v1.6.0-Linux-arm64.tar.gz"
+assert u.asset_name("1.6.0","Windows-x64")=="MSCW-Merchant-Simulator-v1.6.0-Windows-x64.exe"
+assert u.asset_name("1.6.0","macOS-Intel")=="MSCW-Merchant-Simulator-v1.6.0-macOS-Intel.zip"
+assert u.asset_name("1.6.0","Linux-arm64")=="MSCW-Merchant-Simulator-v1.6.0-Linux-arm64.tar.gz"
 h="a"*64
-assert u.parse_checksums(f"{h}  ProfitCalculator-v1-x.exe\n{'B'*64} *other.zip\nbad line")=={"ProfitCalculator-v1-x.exe":h,"other.zip":"b"*64}
+assert u.parse_checksums(f"{h}  MSCW-Merchant-Simulator-v1-x.exe\n{'B'*64} *other.zip\nbad line")=={"MSCW-Merchant-Simulator-v1-x.exe":h,"other.zip":"b"*64}
 
 # fetch_latest with a fake opener
 class R:
@@ -69,19 +69,19 @@ try: u.fetch_latest(opener=lambda *a: (_ for _ in ()).throw(OSError("offline")))
 except u.UpdateError as e: print("offline ->",e)
 
 # linux replace: tar with the binary inside, replacing a "running" file
-w=tempfile.mkdtemp(); exe=os.path.join(w,"ProfitCalculator"); open(exe,"w").write("old"); os.chmod(exe,0o755)
+w=tempfile.mkdtemp(); exe=os.path.join(w,"MSCW-Merchant-Simulator"); open(exe,"w").write("old"); os.chmod(exe,0o755)
 tgz=os.path.join(w,"new.tar.gz")
 src=os.path.join(w,"src"); open(src,"w").write("#!/bin/sh\necho new\n")
-with tarfile.open(tgz,"w:gz") as t: t.add(src,arcname="ProfitCalculator")
-u.linux_replace(tgz,exe); assert open(exe).read().startswith("#!/bin/sh") and os.access(exe,os.X_OK) and not os.path.exists(os.path.join(w,".ProfitCalculator.update"))
+with tarfile.open(tgz,"w:gz") as t: t.add(src,arcname="MSCW-Merchant-Simulator")
+u.linux_replace(tgz,exe); assert open(exe).read().startswith("#!/bin/sh") and os.access(exe,os.X_OK) and not os.path.exists(os.path.join(w,".MSCW-Merchant-Simulator.update"))
 with tarfile.open(tgz,"w:gz") as t: t.add(src,arcname="wrong")
 try: u.linux_replace(tgz,exe); raise SystemExit
 except u.UpdateError as e: print("no binary ->",e)
 
 if platform.system() != 'Windows':
   # mac script: run it for real with stub open/xattr, a finished pid, fake .app dirs
-  m=tempfile.mkdtemp(); app=os.path.join(m,"ProfitCalculator.app"); os.makedirs(app+"/Contents"); open(app+"/Contents/v","w").write("old")
-  stage=os.path.join(m,"stage"); new=os.path.join(stage,"ProfitCalculator.app"); os.makedirs(new+"/Contents"); open(new+"/Contents/v","w").write("new")
+  m=tempfile.mkdtemp(); app=os.path.join(m,"MSCW-Merchant-Simulator.app"); os.makedirs(app+"/Contents"); open(app+"/Contents/v","w").write("old")
+  stage=os.path.join(m,"stage"); new=os.path.join(stage,"MSCW-Merchant-Simulator.app"); os.makedirs(new+"/Contents"); open(new+"/Contents/v","w").write("new")
   bin_=os.path.join(m,"bin"); os.makedirs(bin_)
   for c in ("open","xattr"):
       open(os.path.join(bin_,c),"w").write(f"#!/bin/sh\necho {c} \"$@\" >> '{m}/calls'\n"); os.chmod(os.path.join(bin_,c),0o755)
@@ -93,15 +93,15 @@ if platform.system() != 'Windows':
   assert open(app+"/Contents/v").read()=="new" and not os.path.exists(app+".old") and not os.path.exists(stage)
   print("mac calls:",open(os.path.join(m,"calls")).read().split("\n")[:2])
   # mac script with a path containing a quote and a space
-  m2=tempfile.mkdtemp(); app2=os.path.join(m2,"it's mine","ProfitCalculator.app"); os.makedirs(app2); new2=os.path.join(m2,"n","ProfitCalculator.app"); os.makedirs(new2); open(new2+"/f","w").write("n")
+  m2=tempfile.mkdtemp(); app2=os.path.join(m2,"it's mine","MSCW-Merchant-Simulator.app"); os.makedirs(app2); new2=os.path.join(m2,"n","MSCW-Merchant-Simulator.app"); os.makedirs(new2); open(new2+"/f","w").write("n")
   open(os.path.join(m2,"s.sh"),"w").write(u.mac_script(dead.pid,app2,new2)); 
   subprocess.run(["sh",os.path.join(m2,"s.sh")],env={**os.environ,"PATH":bin_+":"+os.environ["PATH"]},timeout=20)
   assert os.path.exists(app2+"/f"), "quoted path swap failed"
 
 # windows script text (cannot run PowerShell here): check quoting of awkward paths
-ws=u.windows_script(r"C:\Users\O'Neil\Downloads\ProfitCalculator-v1.0.0-Windows-x64.exe", r"C:\Users\O'Neil\Downloads\ProfitCalculator-v1.1.0-Windows-x64.exe", False)
+ws=u.windows_script(r"C:\Users\O'Neil\Downloads\MSCW-Merchant-Simulator-v1.0.0-Windows-x64.exe", r"C:\Users\O'Neil\Downloads\MSCW-Merchant-Simulator-v1.1.0-Windows-x64.exe", False)
 print(ws)
-assert "O''Neil" in ws and "Remove-Item" in ws and "$target = 'C:\\Users\\O''Neil\\Downloads\\ProfitCalculator-v1.1.0-Windows-x64.exe'" in ws
+assert "O''Neil" in ws and "Remove-Item" in ws and "$target = 'C:\\Users\\O''Neil\\Downloads\\MSCW-Merchant-Simulator-v1.1.0-Windows-x64.exe'" in ws
 wi=u.windows_script(r"C:\a\PC.exe", r"C:\a\PC.exe.new", True); assert "Move-Item" in wi and "$target = 'C:\\a\\PC.exe'" in wi
 # install refuses to run from source
 try: u.install("x",info); raise SystemExit
@@ -116,7 +116,7 @@ if platform.system() == "Windows":
         cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", f]
         return (subprocess.run(cmd, timeout=90, check=True) if wait else subprocess.Popen(cmd)), f
     d = tempfile.mkdtemp(prefix="O'Neil \u00e9 ")
-    old = os.path.join(d, "ProfitCalculator-v1.0.0-Windows-x64.exe"); new = os.path.join(d, "ProfitCalculator-v1.1.0-Windows-x64.exe")
+    old = os.path.join(d, "MSCW-Merchant-Simulator-v1.0.0-Windows-x64.exe"); new = os.path.join(d, "MSCW-Merchant-Simulator-v1.1.0-Windows-x64.exe")
     shutil.copy(who, old); shutil.copy(who, new)
     _, f = ps(u.windows_script(old, new, False))
     assert not os.path.exists(old) and os.path.exists(new) and not os.path.exists(f), "versioned swap"
@@ -124,7 +124,7 @@ if platform.system() == "Windows":
     ps(u.windows_script(old2, old2 + ".new", True))
     assert os.path.exists(old2) and not os.path.exists(old2 + ".new") and os.path.getsize(old2) == os.path.getsize(who) + 1, "in-place swap"
     # a locked old exe (as while the app is still running): the script must wait, then finish
-    old3 = os.path.join(d, "ProfitCalculator-v1.2.0-Windows-x64.exe"); new3 = os.path.join(d, "ProfitCalculator-v1.3.0-Windows-x64.exe")
+    old3 = os.path.join(d, "MSCW-Merchant-Simulator-v1.2.0-Windows-x64.exe"); new3 = os.path.join(d, "MSCW-Merchant-Simulator-v1.3.0-Windows-x64.exe")
     shutil.copy(who, old3); shutil.copy(who, new3)
     held = open(old3, "rb")                      # Python opens without share-delete, like a running exe
     proc, _ = ps(u.windows_script(old3, new3, False), wait=False)
@@ -136,12 +136,12 @@ if platform.system() == "Windows":
 
 # install() end to end on Linux: a fake frozen app replaces itself and starts the new one
 if platform.system() == "Linux":
-    d = tempfile.mkdtemp(); exe = os.path.join(d, "ProfitCalculator")
+    d = tempfile.mkdtemp(); exe = os.path.join(d, "MSCW-Merchant-Simulator")
     open(exe, "w").write("#!/bin/sh\necho old\n"); os.chmod(exe, 0o755)
     marker = os.path.join(d, "started"); newsrc = os.path.join(d, "n")
     open(newsrc, "w").write(f"#!/bin/sh\necho started > '{marker}'\n")
     arch = os.path.join(d, "a.tar.gz")
-    with tarfile.open(arch, "w:gz") as t: t.add(newsrc, arcname="ProfitCalculator")
+    with tarfile.open(arch, "w:gz") as t: t.add(newsrc, arcname="MSCW-Merchant-Simulator")
     real = (sys.executable, getattr(sys, "frozen", False))
     sys.executable, sys.frozen = exe, True
     try: u.install(arch, {"version": "9.9.9"})

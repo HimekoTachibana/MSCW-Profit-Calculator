@@ -41,7 +41,7 @@ jobs:
         env:
           RELEASE_INPUT: ${{ inputs.release }}
         run: |
-          VERSION=$(python -c 'import re; print(re.search(r"^__version__\s*=\s*\"([^\"]+)\"", open("profit_calculator.py", encoding="utf-8").read(), re.M).group(1))')
+          VERSION=$(python -c 'import re; print(re.search(r"^__version__\s*=\s*\"([^\"]+)\"", open("mscw_merchant_simulator.py", encoding="utf-8").read(), re.M).group(1))')
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             TAG="$GITHUB_REF_NAME"; PUBLISH=true
           elif [ "$RELEASE_INPUT" = "true" ]; then
@@ -50,7 +50,7 @@ jobs:
               echo "::error::Publish a release from the main branch (this run used $GITHUB_REF)."; exit 1
             fi
             if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-              echo "::error::Tag $TAG already exists. Bump __version__ in profit_calculator.py and add a CHANGELOG.md entry first."; exit 1
+              echo "::error::Tag $TAG already exists. Bump __version__ in mscw_merchant_simulator.py and add a CHANGELOG.md entry first."; exit 1
             fi
           else
             TAG=""; PUBLISH=false
@@ -77,8 +77,8 @@ jobs:
     name: Build ${{ matrix.name }}
     needs: prepare
     env:
-      # e.g. ProfitCalculator-v1.1.0-Windows-x64.exe - the version is always in the file name
-      ASSET: ProfitCalculator-v${{ needs.prepare.outputs.version }}-${{ matrix.base }}${{ matrix.ext }}
+      # e.g. MSCW-Merchant-Simulator-v1.1.0-Windows-x64.exe - the version is always in the file name
+      ASSET: MSCW-Merchant-Simulator-v${{ needs.prepare.outputs.version }}-${{ matrix.base }}${{ matrix.ext }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -96,8 +96,8 @@ jobs:
           python tests/test_updater.py
           if ($LASTEXITCODE -ne 0) { exit 1 }
           python scripts/embed_changelog.py
-          pyinstaller --onefile --windowed --icon assets/icon.ico --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name ProfitCalculator profit_calculator.py
-          Move-Item dist/ProfitCalculator.exe "${{ env.ASSET }}"
+          pyinstaller --onefile --windowed --icon assets/icon.ico --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
+          Move-Item dist/MSCW-Merchant-Simulator.exe "${{ env.ASSET }}"
       - name: Self-test the built app (Windows)
         timeout-minutes: 5
         if: runner.os == 'Windows'
@@ -118,15 +118,15 @@ jobs:
           python -m pip install "pyinstaller>=6.10,<7" certifi
           python tests/test_updater.py
           python scripts/embed_changelog.py
-          pyinstaller --windowed --icon assets/icon.icns --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name ProfitCalculator profit_calculator.py
-          codesign --force --deep --sign - dist/ProfitCalculator.app
-          codesign --verify --deep --strict dist/ProfitCalculator.app
-          ditto -c -k --sequesterRsrc --keepParent dist/ProfitCalculator.app "${{ env.ASSET }}"
+          pyinstaller --windowed --icon assets/icon.icns --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
+          codesign --force --deep --sign - dist/MSCW-Merchant-Simulator.app
+          codesign --verify --deep --strict dist/MSCW-Merchant-Simulator.app
+          ditto -c -k --sequesterRsrc --keepParent dist/MSCW-Merchant-Simulator.app "${{ env.ASSET }}"
       - name: Self-test the built app (macOS)
         if: runner.os == 'macOS'
         run: |
           rm -rf selftest && mkdir selftest && ditto -x -k "${{ env.ASSET }}" selftest
-          selftest/ProfitCalculator.app/Contents/MacOS/ProfitCalculator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
+          selftest/MSCW-Merchant-Simulator.app/Contents/MacOS/MSCW-Merchant-Simulator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
           cat selftest-result.txt
 
       # ------------------------------------------------------------------ Linux
@@ -141,13 +141,13 @@ jobs:
           pip install "pyinstaller>=6.10,<7" certifi
           python tests/test_updater.py
           python scripts/embed_changelog.py
-          pyinstaller --onefile --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name ProfitCalculator profit_calculator.py
-          tar -czf "${{ env.ASSET }}" -C dist ProfitCalculator
+          pyinstaller --onefile --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
+          tar -czf "${{ env.ASSET }}" -C dist MSCW-Merchant-Simulator
       - name: Self-test the built app (Linux)
         if: runner.os == 'Linux'
         run: |
           rm -rf selftest && mkdir selftest && tar -xzf "${{ env.ASSET }}" -C selftest
-          xvfb-run -a selftest/ProfitCalculator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
+          xvfb-run -a selftest/MSCW-Merchant-Simulator --selftest "$PWD/selftest-result.txt" || { cat selftest-result.txt; exit 1; }
           cat selftest-result.txt
 
       - uses: actions/upload-artifact@v6
@@ -181,5 +181,5 @@ jobs:
         run: |
           gh release create "$TAG" release-files/* \
             --target "$GITHUB_SHA" \
-            --title "Profit Calculator $TAG" \
+            --title "MSCW Merchant Simulator $TAG" \
             --notes-file release_notes.md

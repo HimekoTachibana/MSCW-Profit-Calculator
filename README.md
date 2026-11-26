@@ -1,4 +1,4 @@
-# MSCW Profit Calculator
+# MSCW Merchant Simulator
 
 Quickly work out profit when buying, crafting and selling items. Compare as many items as you like,
 include scroll and material costs, apply 3% or 5% tax, and type in a sale price, a profit or a
@@ -25,32 +25,32 @@ Current version: see [CHANGELOG.md](CHANGELOG.md).
 
 ## Download (no installs needed)
 
-Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `ProfitCalculator-v1.7.0-Windows-x64.exe`). Python is bundled inside,
+Get the file for your system from the [Releases](../../releases) page (the version is in every file name, e.g. `MSCW-Merchant-Simulator-v1.7.0-Windows-x64.exe`). Python is bundled inside,
 so there is nothing else to install.
 
 | System | Download | First launch |
 | --- | --- | --- |
-| Windows 10/11 | `ProfitCalculator-v<version>-Windows-x64.exe` | Double-click. If SmartScreen warns, choose **More info → Run anyway** (the app is not code-signed). |
-| macOS, Apple Silicon (M1 and newer) | `ProfitCalculator-v<version>-macOS-AppleSilicon.zip` | Unzip, then right-click the app and choose **Open** the first time (not notarized). |
-| macOS, Intel | `ProfitCalculator-v<version>-macOS-Intel.zip` | Same as above. |
-| Linux x64 (CachyOS, Arch, Ubuntu, Fedora…) | `ProfitCalculator-v<version>-Linux-x64.tar.gz` | `tar xzf ProfitCalculator-v<version>-Linux-x64.tar.gz && ./ProfitCalculator` |
-| Linux arm64 | `ProfitCalculator-v<version>-Linux-arm64.tar.gz` | Same as above. |
+| Windows 10/11 | `MSCW-Merchant-Simulator-v<version>-Windows-x64.exe` | Double-click. If SmartScreen warns, choose **More info → Run anyway** (the app is not code-signed). |
+| macOS, Apple Silicon (M1 and newer) | `MSCW-Merchant-Simulator-v<version>-macOS-AppleSilicon.zip` | Unzip, then right-click the app and choose **Open** the first time (not notarized). |
+| macOS, Intel | `MSCW-Merchant-Simulator-v<version>-macOS-Intel.zip` | Same as above. |
+| Linux x64 (CachyOS, Arch, Ubuntu, Fedora…) | `MSCW-Merchant-Simulator-v<version>-Linux-x64.tar.gz` | `tar xzf MSCW-Merchant-Simulator-v<version>-Linux-x64.tar.gz && ./MSCW-Merchant-Simulator` |
+| Linux arm64 | `MSCW-Merchant-Simulator-v<version>-Linux-arm64.tar.gz` | Same as above. |
 
-If macOS says the app is damaged, run `xattr -dr com.apple.quarantine ProfitCalculator.app` once.
+If macOS says the app is damaged, run `xattr -dr com.apple.quarantine MSCW-Merchant-Simulator.app` once.
 Linux builds need a normal desktop session (X11 or Wayland) and a reasonably recent distribution
 (built on Ubuntu 22.04). `SHA256SUMS.txt` on each release lets you verify a download.
 
 ## Run from source
 
-Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (no other packages). Keep `profit_calculator.py`, `icons_data.py`, `updater.py` and `changelog_data.py` together (run `python scripts/embed_changelog.py` to refresh the changelog the app shows).
+Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (no other packages). Keep `mscw_merchant_simulator.py`, `icons_data.py`, `updater.py` and `changelog_data.py` together (run `python scripts/embed_changelog.py` to refresh the changelog the app shows).
 
 | System | Setup | Run |
 | --- | --- | --- |
-| Windows | Install Python 3 from python.org | `python profit_calculator.py` |
-| macOS | Install Python 3 from python.org (Homebrew: `brew install python-tk`) | `python3 profit_calculator.py` |
-| CachyOS / Arch | `sudo pacman -S python tk` | `python profit_calculator.py` |
+| Windows | Install Python 3 from python.org | `python mscw_merchant_simulator.py` |
+| macOS | Install Python 3 from python.org (Homebrew: `brew install python-tk`) | `python3 mscw_merchant_simulator.py` |
+| CachyOS / Arch | `sudo pacman -S python tk` | `python mscw_merchant_simulator.py` |
 
-`python profit_calculator.py --version` prints the version.
+`python mscw_merchant_simulator.py --version` prints the version.
 
 ## Tips
 

@@ -4,7 +4,7 @@
 Usage:
     python scripts/release_notes.py 1.0.0      # also accepts v1.0.0
     python scripts/release_notes.py --check v1.0.0
-        Exit non-zero unless the tag matches __version__ in profit_calculator.py
+        Exit non-zero unless the tag matches __version__ in mscw_merchant_simulator.py
         AND CHANGELOG.md has a non-empty section for it.
 """
 import os
@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def app_version():
-    with open(os.path.join(ROOT, "profit_calculator.py"), encoding="utf-8") as f:
+    with open(os.path.join(ROOT, "mscw_merchant_simulator.py"), encoding="utf-8") as f:
         m = re.search(r'^__version__\s*=\s*"([^"]+)"', f.read(), re.M)
     return m.group(1) if m else None
 
@@ -39,7 +39,7 @@ def main(argv):
     if check:
         problems = []
         if app_version() != version:
-            problems.append(f"tag is {version} but profit_calculator.py has __version__ = {app_version()}")
+            problems.append(f"tag is {version} but mscw_merchant_simulator.py has __version__ = {app_version()}")
         if not notes:
             problems.append(f"CHANGELOG.md has no entry for [{version}]")
         for p in problems:

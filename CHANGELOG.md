@@ -9,6 +9,17 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-25
+
+### Changed
+- **The app is now called "MSCW Merchant Simulator".** The window title reads
+  `MSCW Merchant Simulator v<version>`, and downloads are named
+  `MSCW-Merchant-Simulator-v<version>-<system>.<ext>` (hyphens, because GitHub turns spaces in file
+  names into dots). Earlier entries below keep the old name, "Profit Calculator".
+- Your saved cards and settings are copied over automatically from the old data folder.
+- Older versions (1.7.0 and before) look for files with the old name, so they cannot update
+  themselves to this release: download it once by hand, after that updating works as before.
+
 ## [1.7.0] - 2026-11-25
 
 ### Added
@@ -205,7 +216,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.5.1
