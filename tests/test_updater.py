@@ -118,20 +118,23 @@ if platform.system() == "Windows":
     d = tempfile.mkdtemp(prefix="O'Neil \u00e9 ")
     old = os.path.join(d, "MSCW-Merchant-Simulator-v1.0.0-Windows-x64.exe"); new = os.path.join(d, "MSCW-Merchant-Simulator-v1.1.0-Windows-x64.exe")
     shutil.copy(who, old); shutil.copy(who, new)
-    _, f = ps(u.windows_script(old, new, False))
+    _, f = ps(u.windows_script(old, new, False, verify=False))
     assert not os.path.exists(old) and os.path.exists(new) and not os.path.exists(f), "versioned swap"
     old2 = os.path.join(d, "PC.exe"); shutil.copy(who, old2); open(old2 + ".new", "wb").write(open(who, "rb").read() + b"\0")
-    ps(u.windows_script(old2, old2 + ".new", True))
+    ps(u.windows_script(old2, old2 + ".new", True, verify=False))
     assert os.path.exists(old2) and not os.path.exists(old2 + ".new") and os.path.getsize(old2) == os.path.getsize(who) + 1, "in-place swap"
     # a locked old exe (as while the app is still running): the script must wait, then finish
     old3 = os.path.join(d, "MSCW-Merchant-Simulator-v1.2.0-Windows-x64.exe"); new3 = os.path.join(d, "MSCW-Merchant-Simulator-v1.3.0-Windows-x64.exe")
     shutil.copy(who, old3); shutil.copy(who, new3)
     held = open(old3, "rb")                      # Python opens without share-delete, like a running exe
-    proc, _ = ps(u.windows_script(old3, new3, False), wait=False)
+    proc, _ = ps(u.windows_script(old3, new3, False, verify=False), wait=False)
     time.sleep(3)
     assert os.path.exists(old3), "deleted a locked file?!"
     held.close(); proc.wait(timeout=60)
     assert not os.path.exists(old3) and os.path.exists(new3), "swap after the lock was released"
+    logf = os.path.join(tempfile.gettempdir(), "MSCW-Merchant-Simulator-update.log")
+    logtext = open(logf, encoding="utf-8", errors="replace").read()
+    assert "swapped=True" in logtext and "started" in logtext, "the update log is missing or incomplete:\n" + logtext
     print("windows swap OK")
 
 # install() end to end on Linux: a fake frozen app replaces itself and starts the new one

@@ -210,18 +210,47 @@ def _ps_quote(text):
     return "'" + str(text).replace("'", "''") + "'"
 
 
-def windows_script(old, new, in_place):
+def windows_script(old, new, in_place, verify=True):
     """PowerShell run after the app exits: swap the files (retrying while the old exe is still
-    locked), then start the new one. in_place: new is moved over old; otherwise old is deleted."""
+    locked), then start the new one. in_place: new is moved over old; otherwise old is deleted.
+
+    Every step is written to %TEMP%\\MSCW-Merchant-Simulator-update.log. The new file is unblocked (no
+    "downloaded from the internet" mark, so no SmartScreen question), started, and - when `verify` -
+    checked: if no process of that name is running after ~30 s it is started again through Explorer,
+    exactly as if it had been double-clicked."""
     target = old if in_place else new
     action = ("Move-Item -LiteralPath $new -Destination $old -Force -ErrorAction Stop" if in_place
               else "if ($old -ne $new) { Remove-Item -LiteralPath $old -Force -ErrorAction Stop }")
-    return (f"$old = {_ps_quote(old)}; $new = {_ps_quote(new)}; $target = {_ps_quote(target)}\n"
-            "for ($i = 0; $i -lt 60; $i++) {\n"
-            f"  try {{ {action}; break }} catch {{ Start-Sleep -Milliseconds 500 }}\n"
-            "}\n"
-            "Start-Process -FilePath $target\n"
-            "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n")
+    lines = [
+        "$old = " + _ps_quote(old) + "; $new = " + _ps_quote(new) + "; $target = " + _ps_quote(target),
+        "$log = Join-Path $env:TEMP 'MSCW-Merchant-Simulator-update.log'",
+        "function Write-Log($m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format s) + ' ' + $m) } catch { } }",
+        "Write-Log ('start: old=' + $old + ' new=' + $new + ' target=' + $target)",
+        "$swapped = $false",
+        "for ($i = 0; $i -lt 60; $i++) {",
+        "  try { " + action + "; $swapped = $true; break } catch { $err = $_; Start-Sleep -Milliseconds 500 }",
+        "}",
+        "Write-Log ('swapped=' + $swapped)",
+        "if (-not $swapped) { Write-Log ('swap error: ' + $err) }",
+        "try { Unblock-File -LiteralPath $target -ErrorAction Stop; Write-Log 'unblocked' } catch { Write-Log ('unblock: ' + $_) }",
+        "try { Start-Process -FilePath $target -ErrorAction Stop; Write-Log 'started' } catch { Write-Log ('start failed: ' + $_) }",
+    ]
+    if verify:
+        lines += [
+            "$name = [System.IO.Path]::GetFileNameWithoutExtension($target)",
+            "$up = $false",
+            "for ($j = 0; $j -lt 60; $j++) {",
+            "  Start-Sleep -Milliseconds 500",
+            "  if (Get-Process -Name $name -ErrorAction SilentlyContinue) { $up = $true; break }",
+            "}",
+            "Write-Log ('running=' + $up)",
+            "if (-not $up) {",
+            "  try { Start-Process -FilePath 'explorer.exe' -ArgumentList ('\"' + $target + '\"'); Write-Log 'explorer fallback' }",
+            "  catch { Write-Log ('explorer failed: ' + $_) }",
+            "}",
+        ]
+    lines.append("Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue")
+    return "\n".join(lines) + "\n"
 
 
 def mac_script(pid, app, new_app):
