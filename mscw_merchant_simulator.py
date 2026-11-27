@@ -3423,9 +3423,12 @@ def selftest(out_path):
         assert abs(ps["greater"]["items"] - 1 / 0.1) < 1e-9, ps         # Greater: 10% and always used once
         assert abs(ps["greater"]["scrolls"] - 1 / 0.1) < 1e-9
         assert abs(ps["intermediate"]["items"] - 1 / (0.6 * 0.28)) < 1e-9, ps
-        sc.stop_at.set("0")
+        sc.stop_at.set("11")
         root.update()
         assert "Restart rule" in sc.msg.cget("text"), "a bad scroll number should be reported"
+        sc.stop_at.set("0")
+        root.update()
+        assert "Restart rule" not in sc.msg.cget("text"), "0 should mean no restart rule"
         sc.stop_at.set("")
         sc.stop_streak.set("1")
         root.update()
