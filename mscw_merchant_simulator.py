@@ -59,7 +59,7 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.7.3"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.7.4"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5
@@ -297,10 +297,11 @@ def parse_int(text, lo=0, hi=None):
 
 
 def parse_positions(text):
-    """Scroll numbers such as "1, 2" or "1-3" -> {1, 2, 3}. Blank -> empty set, invalid -> None."""
+    """Scroll numbers such as "1, 2" or "1-3" -> {1, 2, 3}. Blank or 0 -> empty set (no
+    rule), invalid -> None."""
     t = str(text).replace(" ", "").replace(";", ",").replace("&", ",").rstrip(",")
     out = set()
-    if not t:
+    if not t or t == "0":
         return out
     for part in t.split(","):
         a, sep, b = part.partition("-")
@@ -3542,6 +3543,8 @@ def selftest(out_path):
             assert abs(g2["items"] - 2 / 0.6) < 1e-9, g2
             for bad in ("0x", "1001", "abc"):
                 assert "error" in scroll_report(dict(sc.get_state(), items=bad)), bad
+            assert parse_positions("0") == set() and parse_positions(" 0 ") == set() and parse_positions("1-3") == {1, 2, 3}
+            assert parse_positions("0,1") is None and parse_positions("00x") is None
             assert tries_for(0.9, 2, 0.6) == 5.0 and sure_successes(100000, 0.5, 0.9) > 49000
             sc.items.set("2")
             root.update()

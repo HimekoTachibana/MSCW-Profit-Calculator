@@ -109,8 +109,8 @@ end up with an item that has N successful scrolls?"* Scroll rates follow MeowDB'
   later. Handy for mixes you use often.
 - **Restart with a new item when**: give up on an item and start over with a fresh one when a number
   of scrolls fail in a row, a number fail in total, or particular scrolls fail (for example `1, 2`
-  or `1-3` means "restart if the 1st or 2nd scroll fails"). Leave these blank to keep scrolling every
-  item to the end.
+  or `1-3` means "restart if the 1st or 2nd scroll fails"). Leave these blank (or type `0`) to keep
+  scrolling every item to the end.
 - **Results**: scrolls versus slots, average scrolls used, the chance an item is destroyed or
   restarted, the chance of 0 successes, and the average scroll cost. The bold sentence under it
   sums up your goal.

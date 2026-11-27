@@ -9,6 +9,13 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.7.4] - 2026-11-27
+
+### Changed
+- Scroll Simulator restart rules: typing `0` in "Any of these scrolls fails" now means "no rule",
+  the same as leaving it blank (and the same as `0` in "Fails in a row" and "Fails in total"),
+  instead of showing a red error.
+
 ## [1.7.3] - 2026-11-27
 
 ### Added
@@ -278,7 +285,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.3...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.4...HEAD
+[1.7.4]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.3...v1.7.4
 [1.7.3]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...v1.7.1
