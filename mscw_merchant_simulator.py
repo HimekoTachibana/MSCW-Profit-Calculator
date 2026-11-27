@@ -59,7 +59,7 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.7.1"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.7.2"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5
@@ -1428,7 +1428,8 @@ class ScrollCard(CardBase):
             for c in range(10):
                 frame.columnconfigure(c, weight=0, uniform="")
             for c in range(len(headers)):
-                frame.columnconfigure(c, weight=1, uniform="bd_" + name)
+                # equal column widths, except the per-success table, which must stay narrow
+                frame.columnconfigure(c, weight=1, uniform="" if name == "per" else "bd_" + name)
             hdr = []
             for c in range(len(headers)):
                 lb = ttk.Label(frame, style="Section.TLabel", anchor="e", justify="right")
@@ -1745,7 +1746,7 @@ class ScrollCard(CardBase):
                      fmt_items(rep["per_success"][k]["items"]), fmt_items(rep["per_success"][k]["scrolls"]),
                      short_num(rep["per_success"][k]["base_cost"]),
                      short_num(rep["per_success"][k]["scroll_cost"])] for k in kinds]
-        self._fill_grid("per", ["Scroll", "Base items", "Scrolls used", "Base cost", "Scroll cost"], rows_per)
+        self._fill_grid("per", ["Scroll", "Base\nitems", "Scrolls\nused", "Base\ncost", "Scroll\ncost"], rows_per)
         self._fill_grid("cost", head_cost, rows_cost)
         self._fill_grid("used", head_used, rows_used)
         self._apply_view()

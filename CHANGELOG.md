@@ -9,6 +9,13 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-11-27
+
+### Fixed
+- Choosing the **Per success** tab in the Scroll Simulator made the card (and so every card
+  column) wider than the other tabs, which could push a column of items off the screen. Its
+  table is now as narrow as the others.
+
 ## [1.7.1] - 2026-11-27
 
 ### Added
@@ -243,7 +250,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.6.0
