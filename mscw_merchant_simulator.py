@@ -1349,7 +1349,7 @@ class ScrollCard(CardBase):
             self.bd_frames[name] = fr
             return pan
 
-        table_panel("cost", "Cost to get N successes (base items + scrolls)")
+        table_panel("cost", "Cost and count to get N successes")
         table_panel("used", "Scrolls used to get N successes")
         pan = table_panel("per", "Per scroll success (successes of one scroll type)")
         lbl = ttk.Label(pan, text="Base items and scrolls it takes, added up over items, for 1 success of that "
@@ -1421,7 +1421,8 @@ class ScrollCard(CardBase):
         """Show a small table (headers + rows of text); labels are only rebuilt when its shape changes."""
         frame = self.bd_frames[name]
         g = self._grids.get(name)
-        sig = (len(headers), len(rows))
+        two = any(isinstance(t, tuple) for r in rows for t in r)     # a cell may be (top, number-below)
+        sig = (len(headers), len(rows), two)
         if g is None or g["sig"] != sig:
             for w in frame.winfo_children():
                 w.destroy()
@@ -1440,15 +1441,25 @@ class ScrollCard(CardBase):
                 line = []
                 for c in range(len(headers)):
                     lb = ttk.Label(frame, anchor="e")
-                    lb.grid(row=i + 1, column=c, sticky="e", padx=(0, 6))
-                    line.append(lb)
+                    lb.grid(row=(2 * i + 1) if two else i + 1, column=c, sticky="e", padx=(0, 6))
+                    low = None
+                    if two:
+                        low = ttk.Label(frame, anchor="e", style="Muted.TLabel")
+                        low.grid(row=2 * i + 2, column=c, sticky="e", padx=(0, 6), pady=(0, 3))
+                    line.append((lb, low))
                 cells.append(line)
             g = self._grids[name] = {"sig": sig, "hdr": hdr, "cells": cells}
         for lb, text in zip(g["hdr"], headers):
             lb.config(text=text)
         for line, texts in zip(g["cells"], rows):
-            for lb, text in zip(line, texts):
-                lb.config(text=text)
+            for (lb, low), text in zip(line, texts):
+                if isinstance(text, tuple):
+                    lb.config(text=text[0])
+                    low.config(text=text[1])
+                else:
+                    lb.config(text=text)
+                    if low is not None:
+                        low.config(text="")
         frame.grid()
 
     def _wheel_passthrough(self, event):
@@ -1729,17 +1740,20 @@ class ScrollCard(CardBase):
             f"Base items = copies of the base item you buy on average to get one with {basis} that many "
             "successes (counting the finished one); Duplicates = the others, which fail"
             + (", are destroyed or restart" if rep["rules"] or rep["destroyed"] > 0 else "")
-            + ". The tables above price those copies and the scrolls used on all of them."))
+            + ". In the cost table each cell shows the cost, and under it how many base items or scrolls "
+            "that is."))
         kinds = rep["kinds"]
         per = rep["by_kind"]
         head_cost = ["Successes", "Base items"] + [kind_header(k) for k in kinds] + ["Total"]
-        rows_cost = [["1 item", short_num(rep["equip"])] + [short_num(per[k]["cost"]) for k in kinds]
-                     + [short_num(rep["per_item"])]]
+        rows_cost = [["1 item", (short_num(rep["equip"]), "1")]
+                     + [(short_num(per[k]["cost"]), fmt_items(per[k]["used"])) for k in kinds]
+                     + [(short_num(rep["per_item"]), fmt_items(rep["avg_used"]))]]
         head_used = ["Successes", "Base items"] + [kind_header(k) for k in kinds] + ["All scrolls"]
         rows_used = [["1 item", "1"] + [fmt_items(per[k]["used"]) for k in kinds] + [fmt_items(rep["avg_used"])]]
         for row in rep["rows"]:
-            rows_cost.append([str(row["k"]), short_num(row["base"])]
-                             + [short_num(row["kind_cost"][k]) for k in kinds] + [short_num(row["cost"])])
+            rows_cost.append([str(row["k"]), (short_num(row["base"]), fmt_items(row["items"]))]
+                             + [(short_num(row["kind_cost"][k]), fmt_items(row["kind_used"][k])) for k in kinds]
+                             + [(short_num(row["cost"]), fmt_items(sum(row["kind_used"].values())))])
             rows_used.append([str(row["k"]), fmt_items(row["items"])] + [fmt_items(row["kind_used"][k]) for k in kinds]
                              + [fmt_items(sum(row["kind_used"].values()))])
         rows_per = [[f"{SCROLL_SHORT[k]} {round(SCROLL_KINDS[k][1] * 100)}%",
@@ -3257,6 +3271,7 @@ def selftest(out_path):
             assert abs(rw["base"] - rw["items"] * 20000) < 1e-6 * max(1.0, rw["base"])
             assert abs(rw["extra"] - (rw["items"] - 1.0)) < 1e-9
         assert sc.bd_frames["cost"].winfo_children(), "breakdown table was not built"
+        assert sc._grids["cost"]["sig"][2], "cost table should show the counts under the costs"
         ps = rp["per_success"]
         assert abs(ps["greater"]["items"] - 1 / 0.1) < 1e-9, ps         # Greater: 10% and always used once
         assert abs(ps["greater"]["scrolls"] - 1 / 0.1) < 1e-9

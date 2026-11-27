@@ -11,6 +11,11 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [1.7.2] - 2026-11-27
 
+### Changed
+- Scroll Simulator cost table: every cell now shows the cost with **how many** (base items or
+  scrolls of that type) underneath it, so you can see how many Chaos and Intermediate scrolls
+  you need together with what they cost. The card is a little taller, not wider.
+
 ### Fixed
 - Choosing the **Per success** tab in the Scroll Simulator made the card (and so every card
   column) wider than the other tabs, which could push a column of items off the screen. Its
