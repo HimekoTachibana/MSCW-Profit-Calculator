@@ -59,7 +59,7 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.7.2"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.7.3"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5

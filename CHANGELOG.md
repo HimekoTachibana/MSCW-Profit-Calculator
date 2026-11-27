@@ -9,7 +9,7 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
-## [1.7.2] - 2026-11-27
+## [1.7.3] - 2026-11-27
 
 ### Added
 - Scroll Simulator **Goal** tab: **Finished items wanted** (blank = 1) and, with a budget, how many
@@ -20,9 +20,6 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 ### Changed
 - The summary sentence now says what it means: "To finish 1 item with 5 successful scrolls on each:
   about ..." (one item with all those scrolls succeeding, not several items).
-- Scroll Simulator cost table: every cell now shows the cost with **how many** (base items or
-  scrolls of that type) underneath it, so you can see how many Chaos and Intermediate scrolls
-  you need together with what they cost. The card is a little taller, not wider.
 
 ### Fixed
 - Updating on Windows: the new version did not always start by itself after the update. The update
@@ -30,6 +27,16 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
   ask whether to run it), starts it, checks that it is really running and, if not, starts it again
   the way a double-click would. It also writes what it did to
   `%TEMP%\MSCW-Merchant-Simulator-update.log`, which helps when something still goes wrong.
+  (The fix takes effect when updating *from* this version or later.)
+
+## [1.7.2] - 2026-11-27
+
+### Changed
+- Scroll Simulator cost table: every cell now shows the cost with **how many** (base items or
+  scrolls of that type) underneath it, so you can see how many Chaos and Intermediate scrolls
+  you need together with what they cost. The card is a little taller, not wider.
+
+### Fixed
 - Choosing the **Per success** tab in the Scroll Simulator made the card (and so every card
   column) wider than the other tabs, which could push a column of items off the screen. Its
   table is now as narrow as the others.
@@ -268,7 +275,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.3...HEAD
+[1.7.3]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...v1.7.0
