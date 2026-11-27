@@ -59,7 +59,7 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.7.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.7.1"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5
@@ -1215,7 +1215,7 @@ class ScrollCard(CardBase):
         right.grid(row=1, column=0, sticky="nsew", pady=(8, 0))   # narrow layout: tables underneath
         self.wide, self.span = False, 1
         self._grids = {}                                 # name -> label grid of the small result tables
-        self.bd_titles, self.bd_frames = [], {}
+        self.panels, self.bd_frames = {}, {}
         cur = {"f": left, "r": 0}                        # the frame and row being filled
 
         def field(text, var, kind):
@@ -1310,39 +1310,6 @@ class ScrollCard(CardBase):
                                      wraplength=int(300 * app.scale))
         place(self.summary_lbl, sticky="w", pady=(2, 0))
         self.notes.append(self.summary_lbl)
-        gl = ttk.Label(left, text="Goal and budget", style="Section.TLabel")
-        place(gl, sticky="w", pady=(8, 0))
-        gf = ttk.Frame(left)
-        gf.columnconfigure(1, weight=1)
-        gf.columnconfigure(3, weight=1)
-        ttk.Label(gf, text="Successes wanted").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
-        self._entry(gf, self.goal, "int", width=5).grid(row=0, column=1, sticky="ew", pady=1)
-        ttk.Label(gf, text="Budget").grid(row=0, column=2, sticky="w", padx=(12, 8), pady=1)
-        self._entry(gf, self.budget, "cost", width=10).grid(row=0, column=3, sticky="ew", pady=1)
-        place(gf, sticky="ew")
-        self.goal_lbls = {}
-        gg = ttk.Frame(left)
-        gg.columnconfigure(1, weight=1)
-        for idx, (key, text) in enumerate((("avg", "On average"), ("p50", "Half the time within"),
-                                           ("p90", "9 times in 10 within"), ("budget", "Chance within budget"))):
-            ttk.Label(gg, text=text).grid(row=idx, column=0, sticky="w", pady=1, padx=(0, 8))
-            lbl = ttk.Label(gg, text="\u2014", anchor="e")
-            lbl.grid(row=idx, column=1, sticky="e", pady=1)
-            self.goal_lbls[key] = lbl
-        place(gg, sticky="ew")
-        note("Blank = every scroll succeeds. The percentages assume each base item costs its average "
-             "(so the costs are close, not exact).")
-        self.send_btn = ttk.Button(left, text="Send to item card", command=self.send_to_item)
-        place(self.send_btn, sticky="w", pady=(4, 0))
-        tl = ttk.Label(left, text="Per scroll success (successes of one scroll type)", style="Section.TLabel")
-        place(tl, sticky="w", pady=(8, 0))
-        fr = ttk.Frame(left)
-        place(fr, sticky="ew", pady=(2, 0))
-        self.bd_titles.append(tl)
-        self.bd_frames["per"] = fr
-        note("Base items and scrolls it takes, added up over items, for 1 success of that scroll "
-             "type (x N for N). Items lost along the way are included.")
-        self.per_note = self.notes[-1]
 
         cur["f"], cur["r"] = right, 0                # ---- right half: the tables
         head = ttk.Frame(right)                      # title, then the exact/at-least choice on one line
@@ -1362,18 +1329,63 @@ class ScrollCard(CardBase):
                 row=0, column=c, sticky="e", padx=(0, 6))
         self.table_rows = []
         tabs = ttk.Frame(right)
-        ttk.Radiobutton(tabs, text="Cost table", value="cost", variable=self.view).pack(side="left")
-        ttk.Radiobutton(tabs, text="Scrolls used table", value="used", variable=self.view).pack(
-            side="left", padx=(10, 0))
+        for text, value in (("Cost", "cost"), ("Scrolls used", "used"), ("Per success", "per"), ("Goal", "goal")):
+            ttk.Radiobutton(tabs, text=text, value=value, variable=self.view).pack(side="left", padx=(0, 10))
         place(tabs, sticky="w", pady=(8, 0))
-        for name, title in (("cost", "Cost to get N successes (base items + scrolls)"),
-                            ("used", "Scrolls used to get N successes")):
-            tl = ttk.Label(right, text=title, style="Section.TLabel")
-            place(tl, sticky="w", pady=(8, 0))
-            fr = ttk.Frame(right)
-            place(fr, sticky="ew", pady=(2, 0))
-            self.bd_titles.append(tl)
+        prow = cur["r"]                              # all four panels share this row; the tab picks one
+
+        def panel(name):
+            pan = ttk.Frame(right)
+            pan.columnconfigure(0, weight=1)
+            pan.grid(row=prow, column=0, columnspan=2, sticky="new", pady=(6, 0))
+            self.panels[name] = pan
+            return pan
+
+        def table_panel(name, title):
+            pan = panel(name)
+            ttk.Label(pan, text=title, style="Section.TLabel").grid(row=0, column=0, sticky="w")
+            fr = ttk.Frame(pan)
+            fr.grid(row=1, column=0, sticky="ew", pady=(2, 0))
             self.bd_frames[name] = fr
+            return pan
+
+        table_panel("cost", "Cost to get N successes (base items + scrolls)")
+        table_panel("used", "Scrolls used to get N successes")
+        pan = table_panel("per", "Per scroll success (successes of one scroll type)")
+        lbl = ttk.Label(pan, text="Base items and scrolls it takes, added up over items, for 1 success of that "
+                        "scroll type (x N for N). Items lost along the way are included.",
+                        style="Muted.TLabel", justify="left", wraplength=int(300 * app.scale))
+        lbl.grid(row=2, column=0, sticky="w", pady=(4, 0))
+        self.notes.append(lbl)
+
+        pan = panel("goal")                          # goal and budget
+        ttk.Label(pan, text="Goal and budget", style="Section.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
+        gf = ttk.Frame(pan)
+        gf.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        gf.columnconfigure(1, weight=1)
+        gf.columnconfigure(3, weight=1)
+        ttk.Label(gf, text="Successes wanted").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
+        self._entry(gf, self.goal, "int", width=5).grid(row=0, column=1, sticky="ew", pady=1)
+        ttk.Label(gf, text="Budget").grid(row=0, column=2, sticky="w", padx=(12, 8), pady=1)
+        self._entry(gf, self.budget, "cost", width=10).grid(row=0, column=3, sticky="ew", pady=1)
+        self.goal_lbls = {}
+        gg = ttk.Frame(pan)
+        gg.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+        gg.columnconfigure(1, weight=1)
+        for idx, (key, text) in enumerate((("avg", "On average"), ("p50", "Half the time within"),
+                                           ("p90", "9 times in 10 within"), ("budget", "Chance within budget"))):
+            ttk.Label(gg, text=text).grid(row=idx, column=0, sticky="w", pady=1, padx=(0, 8))
+            lbl = ttk.Label(gg, text="\u2014", anchor="e")
+            lbl.grid(row=idx, column=1, sticky="e", pady=1)
+            self.goal_lbls[key] = lbl
+        lbl = ttk.Label(pan, text="Blank = every scroll succeeds. The percentages assume each base item costs "
+                        "its average (so the costs are close, not exact).", style="Muted.TLabel",
+                        justify="left", wraplength=int(300 * app.scale))
+        lbl.grid(row=3, column=0, sticky="w", pady=(2, 0))
+        self.notes.append(lbl)
+        self.send_btn = ttk.Button(pan, text="Send to item card", command=self.send_to_item)
+        self.send_btn.grid(row=4, column=0, sticky="w", pady=(4, 0))
+        cur["r"] = prow + 1
         self.table_note = ttk.Label(right, text="", style="Muted.TLabel", justify="left",
                                     wraplength=int(300 * app.scale))
         place(self.table_note, sticky="w", pady=(4, 0))
@@ -1554,15 +1566,14 @@ class ScrollCard(CardBase):
             self.app.autosize()
 
     def _apply_view(self):
-        """Show the cost table or the scrolls-used table (the tabs), not both."""
+        """Show the panel picked by the tabs (cost, scrolls used, per success or goal), not all four."""
         show = self.view.get()
-        for name, title in (("cost", self.bd_titles[1]), ("used", self.bd_titles[2])):
-            if self.report is None or "error" in self.report or name != show:
-                title.grid_remove()
-                self.bd_frames[name].grid_remove()
+        ok = self.report is not None and "error" not in self.report
+        for name, pan in self.panels.items():
+            if name == show and (ok or name == "goal"):     # the goal boxes stay usable while fixing an error
+                pan.grid()
             else:
-                title.grid()
-                self.bd_frames[name].grid()
+                pan.grid_remove()
 
     # ---- presets ---------------------------------------------------------- #
     def show_presets(self):
@@ -1688,13 +1699,11 @@ class ScrollCard(CardBase):
                     lbl.grid_remove()
             for fr in self.bd_frames.values():
                 fr.grid_remove()
-            for tl in self.bd_titles:
-                tl.grid_remove()
-            self.per_note.grid_remove()
             self.summary_lbl.config(text="")
             for lbl in self.goal_lbls.values():
                 lbl.config(text="\u2014")
             self._set_summary("")
+            self._apply_view()
             return
         self.msg.config(text="", foreground=MUTED)
         self.summary_lbl.config(text=rep["summary"])
@@ -1720,7 +1729,6 @@ class ScrollCard(CardBase):
             "successes (counting the finished one); Duplicates = the others, which fail"
             + (", are destroyed or restart" if rep["rules"] or rep["destroyed"] > 0 else "")
             + ". The tables above price those copies and the scrolls used on all of them."))
-        self.bd_titles[0].grid()
         kinds = rep["kinds"]
         per = rep["by_kind"]
         head_cost = ["Successes", "Base items"] + [kind_header(k) for k in kinds] + ["Total"]
@@ -1738,7 +1746,6 @@ class ScrollCard(CardBase):
                      short_num(rep["per_success"][k]["base_cost"]),
                      short_num(rep["per_success"][k]["scroll_cost"])] for k in kinds]
         self._fill_grid("per", ["Scroll", "Base items", "Scrolls used", "Base cost", "Scroll cost"], rows_per)
-        self.per_note.grid()
         self._fill_grid("cost", head_cost, rows_cost)
         self._fill_grid("used", head_used, rows_used)
         self._apply_view()
@@ -2064,7 +2071,14 @@ class App:
         self.sets_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Sets", menu=self.sets_menu)
         self._rebuild_sets_menu()
+        imp = tk.Menu(menubar, tearoff=0)
+        imp.add_command(label="Open a cards file (replaces the cards on screen)...",
+                        command=lambda: self.open_cards_file(True))
+        imp.add_command(label="Add the cards from a file...", command=lambda: self.open_cards_file(False))
+        menubar.add_cascade(label="Import", menu=imp)
         export = tk.Menu(menubar, tearoff=0)
+        export.add_command(label="Save all cards as a file (to back up or share)...", command=self.save_cards_file)
+        export.add_separator()
         export.add_command(label="Copy results as text", command=self.copy_text)
         export.add_command(label="Save results as CSV (opens in Excel)...", command=self.save_csv)
         menubar.add_cascade(label="Export", menu=export)
@@ -2210,6 +2224,53 @@ class App:
             messagebox.showerror(APP_NAME, f"Could not save the file:\n\n{exc}", parent=self.root)
             return
         self.status.config(text="Saved " + os.path.basename(path), foreground=MUTED)
+
+    def save_cards_file(self):
+        self.commit_now()
+        path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".json", title="Save all cards",
+                                            initialfile="merchant-simulator-cards.json",
+                                            filetypes=[("Cards file", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"app": APP_NAME, "app_version": __version__, **self.get_state()}, f, indent=2)
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"Could not save the file:\n\n{exc}", parent=self.root)
+            return
+        self.status.config(text="Saved " + os.path.basename(path), foreground=MUTED)
+
+    def open_cards_file(self, replace=True):
+        """Import cards from a file made by 'Save all cards as a file' (replace the cards, or add to them)."""
+        path = filedialog.askopenfilename(parent=self.root, title="Open a cards file",
+                                          filetypes=[("Cards file", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            if os.path.getsize(path) > 5_000_000:
+                raise ValueError("the file is too big")
+            with open(path, encoding="utf-8-sig") as f:
+                data = json.load(f)
+            items = data.get("items") if isinstance(data, dict) else None
+            if not isinstance(items, list) or not items or not all(isinstance(i, dict) for i in items):
+                raise ValueError("it does not look like a cards file from this app")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(APP_NAME, f"Could not open the file:\n\n{exc}", parent=self.root)
+            return
+        items = items[:200]
+        self.commit_now()
+        if replace:
+            if any(c.has_data() for c in self.cards) and not messagebox.askyesno(
+                    APP_NAME, "Replace the cards on screen with the cards in this file?\n\n"
+                    "You can bring them back with Undo.", icon="warning", default="no", parent=self.root):
+                return
+            self._rebuild({"items": items})
+        else:
+            for it in items:
+                self.cards.append(make_card(self.inner, self, len(self.cards), sanitize_card(it)))
+            self._renumber()
+        self.autosize()
+        self.commit_now()
 
     # ---- remembered prices ------------------------------------------------ #
     def recall_price(self, card):
@@ -2917,7 +2978,7 @@ def selftest(out_path):
     _DATA_FILE_OVERRIDE = os.path.join(tempfile.mkdtemp(), "entries.json")
     msg, code, root = "OK", 0, None
     import faulthandler
-    global messagebox, simpledialog
+    global messagebox, simpledialog, filedialog
     try:                          # a hang becomes a failure that shows where it was stuck
         hang_log = open(out_path, "w", encoding="utf-8")
         faulthandler.dump_traceback_later(150, exit=True, file=hang_log)
@@ -2926,7 +2987,7 @@ def selftest(out_path):
 
     def _no_dialog(*a, **k):      # a dialog would wait for a click nobody can make
         raise AssertionError("unexpected dialog during self-test: %r" % (a[:1],))
-    real_messagebox, real_simpledialog = messagebox, simpledialog
+    real_messagebox, real_simpledialog, real_filedialog = messagebox, simpledialog, filedialog
     messagebox = types.SimpleNamespace(askyesno=_no_dialog, askyesnocancel=_no_dialog, showerror=_no_dialog)
     try:
         for roi, want in ((None, None), (-0.01, "grave"), (0, None), (0.01, "copper_coin"),
@@ -3314,9 +3375,9 @@ def selftest(out_path):
             assert g["items50"] == 1.0 and g["items90"] == 3.0 and abs(g["budget_chance"] - 0.84) < 1e-9, g
             assert "error" in scroll_report(dict(sc.get_state(), goal="5")), "goal above the scrolls should be refused"
             assert "1 success" in sc.summary_lbl.cget("text"), sc.summary_lbl.cget("text")
-            sc.view.set("used")
-            root.update()
-            sc.view.set("cost")
+            for tab in ("used", "per", "goal", "cost"):
+                sc.view.set(tab)
+                root.update()
             said_name["v"] = "Mix A"
             sc.sections[0]["count"].set("1")
             sc.save_preset()
@@ -3336,6 +3397,24 @@ def selftest(out_path):
             assert sc.sum_lbl.cget("text"), "folded scroll card has no summary"
             sc.toggle_collapse()
 
+            tmp_json = os.path.join(os.path.dirname(data_file()), "cards-test.json")
+            filedialog = types.SimpleNamespace(asksaveasfilename=lambda *a, **k: tmp_json,
+                                               askopenfilename=lambda *a, **k: tmp_json)
+            app.save_cards_file()
+            before = app.get_state()
+            app.add_card()
+            app.open_cards_file(True)
+            assert app.get_state()["items"] == before["items"], "cards file did not round-trip"
+            app.open_cards_file(False)
+            assert len(app.cards) == 2 * len(before["items"]), "adding cards from a file failed"
+            seen = []
+            messagebox = types.SimpleNamespace(askyesno=lambda *a, **k: True, showinfo=lambda *a, **k: None,
+                                               showerror=lambda *a, **k: seen.append(a), askyesnocancel=_no_dialog)
+            with open(tmp_json, "w", encoding="utf-8") as f:
+                f.write("{not json")
+            app.open_cards_file(True)
+            assert seen and len(app.cards) == 2 * len(before["items"]), "a broken file should only show an error"
+
             app.theme_var.set("dark")
             app._on_theme_changed()
             assert load_settings().get("theme") == "dark"
@@ -3352,7 +3431,7 @@ def selftest(out_path):
     except BaseException:
         msg, code = traceback.format_exc(), 1
     finally:
-        messagebox, simpledialog = real_messagebox, real_simpledialog
+        messagebox, simpledialog, filedialog = real_messagebox, real_simpledialog, real_filedialog
         try:
             faulthandler.cancel_dump_traceback_later()
             if hang_log:

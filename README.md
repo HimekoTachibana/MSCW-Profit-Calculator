@@ -62,7 +62,7 @@ Only needed if you don't use the downloads above. Needs Python 3 with Tkinter (n
 - Saved entries load automatically on the next launch.
 - Each card has **Star**, **Duplicate** and **Collapse** buttons; **Sort by profit %** and the totals line sit under the toolbar.
 - **Sets** menu saves and loads named groups of cards. **Export** copies the results as text or saves a CSV for Excel.
-- Scroll Simulator: set a goal and budget, save **Presets** of scroll mixes, and **Send to item card** to price the result.
+- **Import** opens or adds a cards file saved with Export. Scroll Simulator: set a goal and budget (Goal tab), save **Presets** of scroll mixes, and **Send to item card** to price the result.
 - Prices are remembered by nickname (Settings). Settings > Theme switches light / dark (after a restart).
 - **Settings > What's new** shows the changelog. **Settings > Check for updates now** looks for a newer release; the downloaded apps can install it themselves (checked against the release's SHA-256 first) and restart. Source runs only get a link. Turn the startup check or automatic install on or off in the same menu.
 

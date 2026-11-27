@@ -9,6 +9,18 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-27
+
+### Added
+- **Import menu** with **Export > Save all cards as a file**: back up your cards or share them with
+  someone. *Open a cards file* replaces the cards on screen (Undo brings them back), *Add the
+  cards from a file* adds them to the ones you have.
+
+### Changed
+- The Scroll Simulator is much shorter again, close to the height of an item card. The goal and
+  budget section and the per scroll success table moved next to the cost and scrolls-used tables
+  as tabs (**Cost / Scrolls used / Per success / Goal**).
+
 ## [1.7.0] - 2026-11-26
 
 ### Added
@@ -231,7 +243,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...v1.5.0
