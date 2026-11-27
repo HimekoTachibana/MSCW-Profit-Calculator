@@ -11,7 +11,15 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [1.7.2] - 2026-11-27
 
+### Added
+- Scroll Simulator **Goal** tab: **Finished items wanted** (blank = 1) and, with a budget, how many
+  finished items you can expect to get for it: the chance of reaching the number you want, the
+  average, and the number you are 9 times in 10 sure to reach. "Half the time" and "9 times in 10"
+  now count the base items needed for all the items you want.
+
 ### Changed
+- The summary sentence now says what it means: "To finish 1 item with 5 successful scrolls on each:
+  about ..." (one item with all those scrolls succeeding, not several items).
 - Scroll Simulator cost table: every cell now shows the cost with **how many** (base items or
   scrolls of that type) underneath it, so you can see how many Chaos and Intermediate scrolls
   you need together with what they cost. The card is a little taller, not wider.

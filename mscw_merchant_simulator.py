@@ -277,7 +277,8 @@ DEFAULT_SCROLL_STATE = {
     "stop_streak": "",        # ...this many scrolls in a row fail
     "stop_total": "",         # ...this many scrolls have failed in total
     "stop_at": "",            # ...any of these scrolls fails, e.g. "1, 2" or "1-3"
-    "goal": "",               # successes wanted (blank = every scroll succeeds)
+    "goal": "",               # successes wanted on each item (blank = every scroll succeeds)
+    "items": "",              # finished items wanted (blank = 1)
     "budget": "",             # optional: what you are willing to spend
     "collapsed": False,
     "starred": False,
@@ -361,6 +362,63 @@ def scroll_odds(seq):
     return finished, destroyed, used
 
 
+def binom_sf(n, p, need):
+    """Chance of at least `need` successes in n tries that each succeed with chance p."""
+    if need <= 0:
+        return 1.0
+    if n < need:
+        return 0.0
+    if p >= 1:
+        return 1.0
+    if p <= 0:
+        return 0.0
+    lp, lq, lgn = math.log(p), math.log1p(-p), math.lgamma(n + 1)
+    below = 0.0
+    for i in range(need):
+        below += math.exp(lgn - math.lgamma(i + 1) - math.lgamma(n - i + 1) + i * lp + (n - i) * lq)
+    return max(0.0, min(1.0, 1.0 - below))
+
+
+def tries_for(q, need, p):
+    """Fewest tries after which you have `need` successes with chance at least q (inf if hopeless)."""
+    if p >= 1:
+        return float(need)
+    if p <= 1e-15:
+        return math.inf
+    hi = need
+    while binom_sf(hi, p, need) < q:
+        hi *= 2
+        if hi > 1e13:
+            return math.inf
+    lo = need
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if binom_sf(mid, p, need) >= q:
+            hi = mid
+        else:
+            lo = mid + 1
+    return float(lo)
+
+
+def sure_successes(n, p, q):
+    """The most successes you are at least q sure to get in n tries."""
+    if n <= 0 or p <= 0:
+        return 0
+    if p >= 1:
+        return n
+    if n * p > 5000:                      # big numbers: the normal approximation is plenty accurate
+        z = {0.9: 1.2816, 0.5: 0.0}.get(q, 1.2816)
+        return max(0, int(math.floor(n * p - z * math.sqrt(n * p * (1 - p)))))
+    lo, hi = 0, n
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if binom_sf(n, p, mid) >= q:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
 def scroll_report(d):
     """Everything a scroll simulator shows, or {"error": text} (with "soft": True if nothing is wrong yet)."""
     slots_text = str(d.get("slots", "")).strip()
@@ -402,6 +460,10 @@ def scroll_report(d):
     goal = parse_int(d.get("goal", ""), 0, MAX_SLOTS)
     if goal is None or goal > n:
         return {"error": f"Goal must be a whole number from 1 to {n} (or blank = all {n})."}
+    want = parse_int(d.get("items", ""), 0, 1000)
+    if want is None:
+        return {"error": "Items wanted must be a whole number from 1 to 1000 (or blank = 1)."}
+    want = want or 1
     budget = parse_num(d.get("budget", ""))
     if budget is None:
         return {"error": "Budget is not a valid number."}
@@ -445,26 +507,25 @@ def scroll_report(d):
     grow = rows[kk - 1]
     pg = grow["exact"] if d.get("basis") == "exact" else grow["atleast"]
 
-    def within(q):                             # base items needed so that you get there with chance q
-        if pg >= 1 - 1e-12:
-            return 1.0
-        if pg <= 1e-15:
-            return math.inf
-        return float(max(1, math.ceil(math.log(1 - q) / math.log(1 - pg) - 1e-9)))
-    i50, i90 = within(0.5), within(0.9)
-    info = {"k": kk, "given": bool(goal), "p": pg, "items": grow["items"], "cost": grow["cost"],
+    i50, i90 = tries_for(0.5, want, pg), tries_for(0.9, want, pg)
+    mean_items = grow["items"] * want
+    mean_cost = grow["cost"] * want if not math.isinf(grow["cost"]) else math.inf
+    info = {"k": kk, "given": bool(goal), "want": want, "p": pg, "items": mean_items, "cost": mean_cost,
             "items50": i50, "cost50": times(i50, per_item), "items90": i90, "cost90": times(i90, per_item),
-            "budget": budget, "afford": None, "budget_chance": None}
+            "budget": budget, "afford": None, "budget_chance": None, "done_avg": None, "done_sure": None}
     if budget > 0 and per_item > 0:
-        afford = int(math.floor(budget / per_item + 1e-9))
+        afford = int(math.floor(budget / per_item + 1e-9))      # base items (with their scrolls) the budget buys
         info["afford"] = afford
-        info["budget_chance"] = 0.0 if afford <= 0 else (1.0 if pg >= 1 - 1e-12 else 1 - (1 - pg) ** afford)
-    word = "success" if kk == 1 else "successes"
-    if grow["items"] == math.inf:
-        summary = f"{kk} {word} cannot be reached with these scrolls."
+        info["budget_chance"] = binom_sf(afford, pg, want)      # chance of at least `want` finished items
+        info["done_avg"] = afford * pg                          # finished items expected
+        info["done_sure"] = sure_successes(afford, pg, 0.9)     # at least this many, 9 times in 10
+    word = "successful scroll" if kk == 1 else "successful scrolls"
+    what = "1 item" if want == 1 else f"{want} items"
+    if math.isinf(mean_items):
+        summary = f"Finishing an item with {kk} {word} cannot be done with these scrolls."
     else:
-        summary = (f"For {kk} {word}: about {fmt_items(grow['items'])} base items and {short_num(grow['cost'])} "
-                   f"in total (9 times in 10 under {short_num(info['cost90'])}).")
+        summary = (f"To finish {what} with {kk} {word} on each: about {fmt_items(mean_items)} base items and "
+                   f"{short_num(mean_cost)} in total (9 times in 10 under {short_num(info['cost90'])}).")
     return {"goal": info, "summary": summary, "n": n, "slots": slots, "zero": finished[0], "destroyed": destroyed, "restarted": restarted,
             "rules": rules, "equip": equip, "scroll_cost": scroll_cost, "per_item": per_item,
             "avg_used": sum(used), "kinds": kinds, "by_kind": by_kind,
@@ -522,7 +583,7 @@ def sanitize_scroll(d):
     out = copy.deepcopy(DEFAULT_SCROLL_STATE)
     if not isinstance(d, dict):
         return out
-    for k in ("nickname", "equip_cost", "slots", "stop_streak", "stop_total", "stop_at", "goal", "budget"):
+    for k in ("nickname", "equip_cost", "slots", "stop_streak", "stop_total", "stop_at", "goal", "items", "budget"):
         if isinstance(d.get(k), str):
             out[k] = d[k]
     out["collapsed"] = d.get("collapsed") is True
@@ -1186,11 +1247,11 @@ class ScrollCard(CardBase):
         self.nick, self.equip, self.slots = V(), V(), V()
         self.stop_streak, self.stop_total, self.stop_at = V(), V(), V()
         self.basis = V(value="atleast")
-        self.goal, self.budget, self.view = V(), V(), V(value="cost")
+        self.goal, self.items, self.budget, self.view = V(), V(), V(), V(value="cost")
         self.sections = []       # [{"kind": StringVar (list text), "count": StringVar, "cost": StringVar}]
         self.sec_entries = []    # entries of the scroll rows (rebuilt often)
         self.report = None
-        for v in (self.nick, self.equip, self.slots, self.basis, self.goal, self.budget,
+        for v in (self.nick, self.equip, self.slots, self.basis, self.goal, self.items, self.budget,
                   self.stop_streak, self.stop_total, self.stop_at):
             v.trace_add("write", self._on_var)
         self.view.trace_add("write", self._on_view)
@@ -1363,23 +1424,28 @@ class ScrollCard(CardBase):
         gf = ttk.Frame(pan)
         gf.grid(row=1, column=0, sticky="ew", pady=(2, 0))
         gf.columnconfigure(1, weight=1)
-        gf.columnconfigure(3, weight=1)
-        ttk.Label(gf, text="Successes wanted").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
+        ttk.Label(gf, text="Successes on each item").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
         self._entry(gf, self.goal, "int", width=5).grid(row=0, column=1, sticky="ew", pady=1)
-        ttk.Label(gf, text="Budget").grid(row=0, column=2, sticky="w", padx=(12, 8), pady=1)
-        self._entry(gf, self.budget, "cost", width=10).grid(row=0, column=3, sticky="ew", pady=1)
+        ttk.Label(gf, text="Finished items wanted").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=1)
+        self._entry(gf, self.items, "int", width=5).grid(row=1, column=1, sticky="ew", pady=1)
+        ttk.Label(gf, text="Budget").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=1)
+        self._entry(gf, self.budget, "cost", width=10).grid(row=2, column=1, sticky="ew", pady=1)
         self.goal_lbls = {}
         gg = ttk.Frame(pan)
         gg.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         gg.columnconfigure(1, weight=1)
         for idx, (key, text) in enumerate((("avg", "On average"), ("p50", "Half the time within"),
-                                           ("p90", "9 times in 10 within"), ("budget", "Chance within budget"))):
+                                           ("p90", "9 times in 10 within"),
+                                           ("budget", "Chance of reaching it in budget"),
+                                           ("done", "Finished items in budget"),
+                                           ("sure", "At least, 9 times in 10"))):
             ttk.Label(gg, text=text).grid(row=idx, column=0, sticky="w", pady=1, padx=(0, 8))
             lbl = ttk.Label(gg, text="\u2014", anchor="e")
             lbl.grid(row=idx, column=1, sticky="e", pady=1)
             self.goal_lbls[key] = lbl
-        lbl = ttk.Label(pan, text="Blank = every scroll succeeds. The percentages assume each base item costs "
-                        "its average (so the costs are close, not exact).", style="Muted.TLabel",
+        lbl = ttk.Label(pan, text="A finished item has every wanted success on it (blank = all scrolls succeed). "
+                        "Items wanted blank = 1. The budget answers use the average cost of a base "
+                        "item, so they are close, not exact.", style="Muted.TLabel",
                         justify="left", wraplength=int(300 * app.scale))
         lbl.grid(row=3, column=0, sticky="w", pady=(2, 0))
         self.notes.append(lbl)
@@ -1518,6 +1584,7 @@ class ScrollCard(CardBase):
             "stop_total": self.stop_total.get(),
             "stop_at": self.stop_at.get(),
             "goal": self.goal.get(),
+            "items": self.items.get(),
             "budget": self.budget.get(),
             "collapsed": self.collapsed,
             "starred": self.starred,
@@ -1538,6 +1605,7 @@ class ScrollCard(CardBase):
             self.stop_total.set(d["stop_total"])
             self.stop_at.set(d["stop_at"])
             self.goal.set(d["goal"])
+            self.items.set(d["items"])
             self.budget.set(d["budget"])
             self.sections = []
             for sec in d["sections"]:
@@ -1550,7 +1618,7 @@ class ScrollCard(CardBase):
         self._update_title()
 
     def has_data(self):
-        if any(v.get().strip() for v in (self.nick, self.equip, self.slots, self.goal, self.budget,
+        if any(v.get().strip() for v in (self.nick, self.equip, self.slots, self.goal, self.items, self.budget,
                                          self.stop_streak, self.stop_total, self.stop_at)):
             return True
         return len(self.sections) > 1 or any(
@@ -1724,10 +1792,14 @@ class ScrollCard(CardBase):
         self.goal_lbls["p50"].config(text=f"{fmt_items(g['items50'])} items \u00b7 {short_num(g['cost50'])}")
         self.goal_lbls["p90"].config(text=f"{fmt_items(g['items90'])} items \u00b7 {short_num(g['cost90'])}")
         if g["budget_chance"] is not None:
-            self.goal_lbls["budget"].config(text=f"{fmt_chance(g['budget_chance'])} ({g['afford']} items)")
+            self.goal_lbls["budget"].config(text=f"{fmt_chance(g['budget_chance'])} ({g['afford']} base items)")
+            self.goal_lbls["done"].config(text=f"{g['done_avg']:.2f} on average")
+            self.goal_lbls["sure"].config(text=f"{g['done_sure']} finished item{'' if g['done_sure'] == 1 else 's'}")
         else:
-            self.goal_lbls["budget"].config(text="\u2014")
-        self._set_summary("" if math.isinf(g["cost"]) else f"{g['k']} succ.: {short_num(g['cost'])}")
+            for key in ("budget", "done", "sure"):
+                self.goal_lbls[key].config(text="\u2014")
+        self._set_summary("" if math.isinf(g["cost"]) else
+                          (f"{g['want']} x " if g["want"] > 1 else "") + f"{g['k']} succ.: {short_num(g['cost'])}")
         n = rep["n"]
         self.sum_lbls["slots"].config(text=f"{n} of {rep['slots']}")
         self.sum_lbls["destroy"].config(text=fmt_chance(rep["destroyed"]))
@@ -3390,6 +3462,17 @@ def selftest(out_path):
             g = scroll_report(sc.get_state())["goal"]
             assert g["items50"] == 1.0 and g["items90"] == 3.0 and abs(g["budget_chance"] - 0.84) < 1e-9, g
             assert "error" in scroll_report(dict(sc.get_state(), goal="5")), "goal above the scrolls should be refused"
+            g2 = scroll_report(dict(sc.get_state(), items="2"))["goal"]
+            assert g2["items50"] == 3.0 and g2["items90"] == 5.0, g2
+            assert abs(g2["budget_chance"] - 0.36) < 1e-9 and abs(g2["done_avg"] - 1.2) < 1e-9 and g2["done_sure"] == 0, g2
+            assert abs(g2["items"] - 2 / 0.6) < 1e-9, g2
+            for bad in ("0x", "1001", "abc"):
+                assert "error" in scroll_report(dict(sc.get_state(), items=bad)), bad
+            assert tries_for(0.9, 2, 0.6) == 5.0 and sure_successes(100000, 0.5, 0.9) > 49000
+            sc.items.set("2")
+            root.update()
+            assert "2 items" in sc.summary_lbl.cget("text"), sc.summary_lbl.cget("text")
+            sc.items.set("")
             assert "1 success" in sc.summary_lbl.cget("text"), sc.summary_lbl.cget("text")
             for tab in ("used", "per", "goal", "cost"):
                 sc.view.set(tab)
