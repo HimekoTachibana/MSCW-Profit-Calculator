@@ -29,7 +29,7 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
   helper now removes the "downloaded from the internet" mark from the new file (so Windows does not
   ask whether to run it), starts it, checks that it is really running and, if not, starts it again
   the way a double-click would. It also writes what it did to
-  `%TEMP%\\MSCW-Merchant-Simulator-update.log`, which helps when something still goes wrong.
+  `%TEMP%\MSCW-Merchant-Simulator-update.log`, which helps when something still goes wrong.
 - Choosing the **Per success** tab in the Scroll Simulator made the card (and so every card
   column) wider than the other tabs, which could push a column of items off the screen. Its
   table is now as narrow as the others.
