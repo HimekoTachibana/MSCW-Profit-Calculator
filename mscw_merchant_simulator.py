@@ -31,6 +31,8 @@ Tips
 """
 
 import copy
+import csv
+import io
 import json
 import math
 import os
@@ -44,7 +46,7 @@ import types
 import webbrowser
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 try:  # the embedded pictures are optional - the app still works without them
     import icons_data
@@ -57,7 +59,7 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.6.0"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.7.0"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5
@@ -83,6 +85,32 @@ GREEN = "#1a7f37"
 RED = "#c62828"
 AMBER = "#b45309"
 MUTED = "#777777"
+ENTRY_FG = "black"
+ENTRY_BORDER = "#c8ccd0"
+THEME = "light"
+THEMES = {
+    "light": {"BG_OK": "#ffffff", "BG_RO": "#eceff1", "BG_BAD": "#ffd9d9", "GREEN": "#1a7f37", "RED": "#c62828",
+              "AMBER": "#b45309", "MUTED": "#777777", "ENTRY_FG": "black", "ENTRY_BORDER": "#c8ccd0"},
+    "dark": {"BG_OK": "#2d333b", "BG_RO": "#22272e", "BG_BAD": "#5c2b2b", "GREEN": "#3fb950", "RED": "#ff7b72",
+             "AMBER": "#e3b341", "MUTED": "#9aa4b0", "ENTRY_FG": "#e6edf3", "ENTRY_BORDER": "#444c56"},
+}
+DARK_UI = {"win": "#1c2128", "fg": "#e6edf3", "btn": "#373e47", "btn_active": "#444c56",
+           "border": "#444c56", "dis": "#6e7681", "accent": "#58a6ff"}
+
+
+def apply_theme(name):
+    """Switch the colour constants used when widgets are built ("light" or "dark")."""
+    global THEME
+    THEME = name if name in THEMES else "light"
+    globals().update(THEMES[THEME])
+    return THEME
+
+
+def lighten(color, amount=0.55):
+    """'#rrggbb' blended toward white (used so dark-on-light verdict colours stay readable on dark)."""
+    c = color.lstrip("#")
+    r, g, b = (int(c[i:i + 2], 16) for i in (0, 2, 4))
+    return "#%02x%02x%02x" % tuple(int(v + (255 - v) * amount) for v in (r, g, b))
 
 DEFAULT_STATE = {
     "type": "profit",
@@ -96,6 +124,8 @@ DEFAULT_STATE = {
     "sale_price": "",
     "target_profit": "",
     "target_pct": "",
+    "collapsed": False,       # card folded to its title line
+    "starred": False,         # starred items sort first
 }
 
 
@@ -163,7 +193,8 @@ def compute(d):
     net = sale - tax
     profit = net - cost
     roi = (profit / cost * 100.0) if cost > 0 else None
-    return {"base": base, "scroll_total": scroll_total, "mat_total": mat_total,
+    break_even = max(0, math.ceil(cost / (1 - rate) - 1e-9)) if cost > 0 else 0     # lowest price with no loss
+    return {"break_even": break_even, "base": base, "scroll_total": scroll_total, "mat_total": mat_total,
             "cost": cost, "rate": rate, "sale": sale, "tax": tax, "net": net,
             "profit": profit, "roi": roi}
 
@@ -208,6 +239,8 @@ def sanitize_item(d):
         out["tax"] = d["tax"]
     if d.get("mode") in ("price", "profit", "percent"):
         out["mode"] = d["mode"]
+    out["collapsed"] = d.get("collapsed") is True
+    out["starred"] = d.get("starred") is True
     mats = []
     if isinstance(d.get("materials"), list):
         for m in d["materials"][:MAX_MATERIALS]:
@@ -244,6 +277,10 @@ DEFAULT_SCROLL_STATE = {
     "stop_streak": "",        # ...this many scrolls in a row fail
     "stop_total": "",         # ...this many scrolls have failed in total
     "stop_at": "",            # ...any of these scrolls fails, e.g. "1, 2" or "1-3"
+    "goal": "",               # successes wanted (blank = every scroll succeeds)
+    "budget": "",             # optional: what you are willing to spend
+    "collapsed": False,
+    "starred": False,
 }
 
 
@@ -362,6 +399,12 @@ def scroll_report(d):
         slots = n                              # blank: the item has exactly the slots you use
     if n > slots:
         return {"error": f"That uses {n} scrolls but the item has only {slots} slot{'' if slots == 1 else 's'}."}
+    goal = parse_int(d.get("goal", ""), 0, MAX_SLOTS)
+    if goal is None or goal > n:
+        return {"error": f"Goal must be a whole number from 1 to {n} (or blank = all {n})."}
+    budget = parse_num(d.get("budget", ""))
+    if budget is None:
+        return {"error": "Budget is not a valid number."}
     finished, destroyed, restarted, used = scroll_sim([(p, q) for p, q, _ in seq], streak, total, positions)
     scroll_cost = sum(cost * u for (_, _, cost), u in zip(seq, used))
     per_item = equip + scroll_cost
@@ -397,7 +440,32 @@ def scroll_report(d):
                      "kind_cost": {kd: times(items, by_kind[kd]["cost"]) for kd in kinds},
                      "kind_used": {kd: times(items, by_kind[kd]["used"]) for kd in kinds}})
     rules = bool(streak or total or (positions & set(range(1, n + 1))))
-    return {"n": n, "slots": slots, "zero": finished[0], "destroyed": destroyed, "restarted": restarted,
+
+    kk = goal or n                             # the number of successes the goal section talks about
+    grow = rows[kk - 1]
+    pg = grow["exact"] if d.get("basis") == "exact" else grow["atleast"]
+
+    def within(q):                             # base items needed so that you get there with chance q
+        if pg >= 1 - 1e-12:
+            return 1.0
+        if pg <= 1e-15:
+            return math.inf
+        return float(max(1, math.ceil(math.log(1 - q) / math.log(1 - pg) - 1e-9)))
+    i50, i90 = within(0.5), within(0.9)
+    info = {"k": kk, "given": bool(goal), "p": pg, "items": grow["items"], "cost": grow["cost"],
+            "items50": i50, "cost50": times(i50, per_item), "items90": i90, "cost90": times(i90, per_item),
+            "budget": budget, "afford": None, "budget_chance": None}
+    if budget > 0 and per_item > 0:
+        afford = int(math.floor(budget / per_item + 1e-9))
+        info["afford"] = afford
+        info["budget_chance"] = 0.0 if afford <= 0 else (1.0 if pg >= 1 - 1e-12 else 1 - (1 - pg) ** afford)
+    word = "success" if kk == 1 else "successes"
+    if grow["items"] == math.inf:
+        summary = f"{kk} {word} cannot be reached with these scrolls."
+    else:
+        summary = (f"For {kk} {word}: about {fmt_items(grow['items'])} base items and {short_num(grow['cost'])} "
+                   f"in total (9 times in 10 under {short_num(info['cost90'])}).")
+    return {"goal": info, "summary": summary, "n": n, "slots": slots, "zero": finished[0], "destroyed": destroyed, "restarted": restarted,
             "rules": rules, "equip": equip, "scroll_cost": scroll_cost, "per_item": per_item,
             "avg_used": sum(used), "kinds": kinds, "by_kind": by_kind,
             "per_success": per_success, "rows": rows}
@@ -454,9 +522,11 @@ def sanitize_scroll(d):
     out = copy.deepcopy(DEFAULT_SCROLL_STATE)
     if not isinstance(d, dict):
         return out
-    for k in ("nickname", "equip_cost", "slots", "stop_streak", "stop_total", "stop_at"):
+    for k in ("nickname", "equip_cost", "slots", "stop_streak", "stop_total", "stop_at", "goal", "budget"):
         if isinstance(d.get(k), str):
             out[k] = d[k]
+    out["collapsed"] = d.get("collapsed") is True
+    out["starred"] = d.get("starred") is True
     if d.get("basis") in ("exact", "atleast"):
         out["basis"] = d["basis"]
     secs = []
@@ -583,6 +653,11 @@ class CardBase(ttk.Frame):
         self._updating = False
         self._drag_target = None
         self.entries = []        # (entry, var, kind) for the fixed fields
+        self.collapsed = False   # folded to its title line
+        self.starred = False     # starred items come first when sorting
+        self._summary = ""       # short text shown on the title line while folded
+        self.body = None
+        self.last = None         # latest calculation result (item cards only)
 
     # ---- widgets ---------------------------------------------------------- #
     def _entry(self, parent, var, kind, width=14, store=None, bold=False):
@@ -591,10 +666,10 @@ class CardBase(ttk.Frame):
             kw["font"] = self.app.f_bold
         e = tk.Entry(parent, textvariable=var, width=width,
                      justify="left" if kind == "text" else "right",
-                     relief="solid", bd=1, bg=BG_OK, fg="black",
-                     readonlybackground=BG_RO, insertbackground="black",
-                     disabledforeground="black", highlightthickness=1,
-                     highlightbackground="#c8ccd0", highlightcolor="#3b82f6", **kw)
+                     relief="solid", bd=1, bg=BG_OK, fg=ENTRY_FG,
+                     readonlybackground=BG_RO, insertbackground=ENTRY_FG,
+                     disabledforeground=ENTRY_FG, highlightthickness=1,
+                     highlightbackground=ENTRY_BORDER, highlightcolor="#3b82f6", **kw)
         if kind in ("cost", "signed"):
             e.bind("<FocusOut>", lambda ev, v=var, k=kind: self._reformat(v, k))
         (self.entries if store is None else store).append((e, var, kind))
@@ -634,6 +709,55 @@ class CardBase(ttk.Frame):
         self.remove_btn = ttk.Button(head, text="Remove", width=8,
                                      command=lambda: self.app.remove_card(self))
         self.remove_btn.grid(row=0, column=4, padx=(4, 0))
+        row2 = ttk.Frame(head)                       # star, duplicate, fold - and a summary while folded
+        row2.grid(row=1, column=0, columnspan=5, sticky="ew", pady=(4, 0))
+        row2.columnconfigure(3, weight=1)
+        self.star_btn = ttk.Button(row2, text="\u2606", width=3, command=self.toggle_star)
+        self.star_btn.grid(row=0, column=0)
+        self.dup_btn = ttk.Button(row2, text="Duplicate", width=9, command=lambda: self.app.duplicate_card(self))
+        self.dup_btn.grid(row=0, column=1, padx=(4, 0))
+        self.fold_btn = ttk.Button(row2, text="Collapse", width=9, command=self.toggle_collapse)
+        self.fold_btn.grid(row=0, column=2, padx=(4, 0))
+        self.sum_lbl = ttk.Label(row2, text="", style="Muted.TLabel", anchor="e")
+        self.sum_lbl.grid(row=0, column=3, sticky="e", padx=(8, 0))
+        self.head = head
+
+    def _bind_recall(self, entry):
+        """Leaving the nickname box fills in prices remembered for that name (if the price boxes are empty)."""
+        entry.bind("<FocusOut>", lambda e: self.app.recall_price(self), add="+")
+
+    def toggle_star(self):
+        self.app.commit_now()
+        self.starred = not self.starred
+        self._apply_flags()
+        self._update_title()
+        self.app.commit_now()
+
+    def toggle_collapse(self):
+        self.app.commit_now()
+        self.collapsed = not self.collapsed
+        self._apply_flags()
+        self.app.commit_now()
+        self.app.autosize()
+
+    def _apply_flags(self):
+        self.star_btn.config(text="\u2605" if self.starred else "\u2606")
+        self.fold_btn.config(text="Expand" if self.collapsed else "Collapse")
+        if self.body is not None:
+            if self.collapsed:
+                self.body.grid_remove()
+            else:
+                self.body.grid()
+        self.sum_lbl.config(text=self._summary if self.collapsed else "")
+
+    def _set_summary(self, text):
+        self._summary = text
+        if self.collapsed:
+            self.sum_lbl.config(text=text)
+
+    def _load_flags(self, d):
+        self.collapsed, self.starred = bool(d.get("collapsed")), bool(d.get("starred"))
+        self._apply_flags()
 
     def display_name(self):
         return self.nick.get().strip() or f"{self.kind_label} {self.index + 1}"
@@ -658,7 +782,8 @@ class CardBase(ttk.Frame):
         nick = self.nick.get().strip()
         if len(nick) > 26:
             nick = nick[:25] + "…"
-        self.title_lbl.config(text=f"{self.kind_label} {self.index + 1}" + (f" — {nick}" if nick else ""))
+        self.title_lbl.config(text=("\u2605 " if self.starred else "")
+                              + f"{self.kind_label} {self.index + 1}" + (f" — {nick}" if nick else ""))
 
     # ---- drag to reorder -------------------------------------------------- #
     def _drag_start(self, event):
@@ -718,6 +843,7 @@ class Card(CardBase):
         self.nick, self.base, self.scrolls, self.sprice = V(), V(), V(), V()
         self.sale, self.target, self.pct, self.total = V(), V(), V(), V()
         self.tier_key = None
+        self.last = None         # result of the latest calculation (None while a field is invalid)
         self.tax, self.mode = V(value="3%"), V(value="price")
         for v in (self.nick, self.base, self.scrolls, self.sprice,
                   self.sale, self.target, self.pct, self.tax, self.mode):
@@ -736,6 +862,7 @@ class Card(CardBase):
         body = ttk.Frame(self)
         body.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         body.columnconfigure(1, weight=1)
+        self.body = body
         r = 0
 
         def sep():
@@ -767,6 +894,7 @@ class Card(CardBase):
             return lbl
 
         field("Nickname", self.nick, "text")
+        self._bind_recall(self.entries[-1][0])
         sep()
 
         section("Costs")
@@ -809,6 +937,7 @@ class Card(CardBase):
         sep()
 
         section("Results")
+        self.be_lbl = result("Break-even sale price")
         self.tax_lbl = result("Tax paid")
         self.net_lbl = result("You receive after tax")
         self.profit_lbl = result("Profit", big=True)
@@ -866,6 +995,8 @@ class Card(CardBase):
             "sale_price": self.sale.get(),
             "target_profit": self.target.get(),
             "target_pct": self.pct.get(),
+            "collapsed": self.collapsed,
+            "starred": self.starred,
         }
 
     def load_state(self, d):
@@ -888,6 +1019,28 @@ class Card(CardBase):
             self._updating = False
         self._rebuild_mats()
         self.recalc()
+        self._load_flags(d)
+        self._update_title()
+
+    def recall(self, mem):
+        """Fill in remembered prices, but only into boxes that are still empty."""
+        if mem.get("base") and not self.base.get().strip():
+            self.base.set(mem["base"])
+        if mem.get("scroll_price") and not self.sprice.get().strip():
+            self.sprice.set(mem["scroll_price"])
+
+    def price_memory(self):
+        out = {}
+        for key, var in (("base", self.base), ("scroll_price", self.sprice)):
+            t = var.get().strip()
+            if t and parse_num(t) is not None:
+                out[key] = t
+        return out
+
+    def sort_key(self):
+        """Starred first, then the best profit % first; items without a result last."""
+        roi = self.last["roi"] if self.last and self.last["roi"] is not None else -math.inf
+        return (0 if self.starred else 1, -roi)
 
     def has_data(self):
         if any(v.get().strip() for v in (self.nick, self.base, self.scrolls, self.sprice)):
@@ -909,7 +1062,8 @@ class Card(CardBase):
         self.tier_key = key
         img = self.app.tier_images.get(key) if key else None
         self.reward_icon.config(image=img or self.app.blank_icon)
-        self.reward_title.config(text="" if tier is NEUTRAL_TIER else title, foreground=fg)
+        self.reward_title.config(text="" if tier is NEUTRAL_TIER else title,
+                                 foreground=lighten(fg) if THEME == "dark" else fg)
 
     # ---- events ----------------------------------------------------------- #
     def _add_mat_vars(self, cost, qty):
@@ -973,15 +1127,18 @@ class Card(CardBase):
         self._update_title()
 
         if self._validate():
+            self.last = None
+            self._set_summary("")
             self.total.set("—")
             self.breakdown.config(text="")
-            for lbl in (self.tax_lbl, self.net_lbl, self.roi_lbl):
+            for lbl in (self.be_lbl, self.tax_lbl, self.net_lbl, self.roi_lbl):
                 lbl.config(text="—")
             self.profit_lbl.config(text="Check red fields", foreground=RED)
             self._set_reward(NEUTRAL_TIER)
             return
 
         r = compute(st)
+        self.last = r
         self._updating = True
         try:
             self.total.set(fmt_num(r["cost"]))
@@ -1003,6 +1160,7 @@ class Card(CardBase):
             parts.append(f"Materials {fmt_num(r['mat_total'])}")
         self.breakdown.config(text="  ·  ".join(parts))
 
+        self.be_lbl.config(text=fmt_num(r["break_even"]) if r["cost"] > 0 else "—")
         self.tax_lbl.config(text=fmt_num(r["tax"]))
         self.net_lbl.config(text=fmt_num(r["net"]))
         p = r["profit"]
@@ -1011,6 +1169,8 @@ class Card(CardBase):
         roi = r["roi"]
         self.roi_lbl.config(text="—" if roi is None else f"{roi:,.2f}%")
         self._set_reward(tier_for(roi))
+        self._set_summary("" if r["cost"] <= 0 else
+                          f"{'+' if p > 0.005 else ''}{short_num(p)}" + ("" if roi is None else f"  ({roi:,.1f}%)"))
 
 
 # --------------------------------------------------------------------------- #
@@ -1026,12 +1186,14 @@ class ScrollCard(CardBase):
         self.nick, self.equip, self.slots = V(), V(), V()
         self.stop_streak, self.stop_total, self.stop_at = V(), V(), V()
         self.basis = V(value="atleast")
+        self.goal, self.budget, self.view = V(), V(), V(value="cost")
         self.sections = []       # [{"kind": StringVar (list text), "count": StringVar, "cost": StringVar}]
         self.sec_entries = []    # entries of the scroll rows (rebuilt often)
         self.report = None
-        for v in (self.nick, self.equip, self.slots, self.basis,
+        for v in (self.nick, self.equip, self.slots, self.basis, self.goal, self.budget,
                   self.stop_streak, self.stop_total, self.stop_at):
             v.trace_add("write", self._on_var)
+        self.view.trace_add("write", self._on_view)
         self._build()
         self.load_state(state)
 
@@ -1084,6 +1246,7 @@ class ScrollCard(CardBase):
 
         self.notes = []
         field("Equipment", self.nick, "text")
+        self._bind_recall(self.entries[-1][0])
         pair = ttk.Frame(left)                       # cost and slots share one line
         pair.columnconfigure(1, weight=1)
         ttk.Label(pair, text="Cost").grid(row=0, column=0, sticky="w", padx=(0, 8))
@@ -1100,6 +1263,12 @@ class ScrollCard(CardBase):
         place(self.sec_head, sticky="ew", pady=(0, 2))
         self.sec_frame = ttk.Frame(left)
         place(self.sec_frame, sticky="ew")
+        pr = ttk.Frame(left)
+        self.preset_btn = ttk.Button(pr, text="Presets \u25be", command=self.show_presets)
+        self.preset_btn.pack(side="left")
+        ttk.Label(pr, text="save and reuse a mix of scrolls and rules", style="Muted.TLabel").pack(
+            side="left", padx=(8, 0))
+        place(pr, sticky="w", pady=(2, 0))
         note("Used top to bottom; every scroll uses 1 slot, pass or fail.")
         sep()
 
@@ -1137,6 +1306,34 @@ class ScrollCard(CardBase):
         place(grid, sticky="ew")
         self.msg = ttk.Label(left, text="", justify="left", wraplength=int(300 * app.scale))
         place(self.msg, sticky="w", pady=(2, 0))
+        self.summary_lbl = ttk.Label(left, text="", justify="left", font=app.f_bold,
+                                     wraplength=int(300 * app.scale))
+        place(self.summary_lbl, sticky="w", pady=(2, 0))
+        self.notes.append(self.summary_lbl)
+        gl = ttk.Label(left, text="Goal and budget", style="Section.TLabel")
+        place(gl, sticky="w", pady=(8, 0))
+        gf = ttk.Frame(left)
+        gf.columnconfigure(1, weight=1)
+        gf.columnconfigure(3, weight=1)
+        ttk.Label(gf, text="Successes wanted").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
+        self._entry(gf, self.goal, "int", width=5).grid(row=0, column=1, sticky="ew", pady=1)
+        ttk.Label(gf, text="Budget").grid(row=0, column=2, sticky="w", padx=(12, 8), pady=1)
+        self._entry(gf, self.budget, "cost", width=10).grid(row=0, column=3, sticky="ew", pady=1)
+        place(gf, sticky="ew")
+        self.goal_lbls = {}
+        gg = ttk.Frame(left)
+        gg.columnconfigure(1, weight=1)
+        for idx, (key, text) in enumerate((("avg", "On average"), ("p50", "Half the time within"),
+                                           ("p90", "9 times in 10 within"), ("budget", "Chance within budget"))):
+            ttk.Label(gg, text=text).grid(row=idx, column=0, sticky="w", pady=1, padx=(0, 8))
+            lbl = ttk.Label(gg, text="\u2014", anchor="e")
+            lbl.grid(row=idx, column=1, sticky="e", pady=1)
+            self.goal_lbls[key] = lbl
+        place(gg, sticky="ew")
+        note("Blank = every scroll succeeds. The percentages assume each base item costs its average "
+             "(so the costs are close, not exact).")
+        self.send_btn = ttk.Button(left, text="Send to item card", command=self.send_to_item)
+        place(self.send_btn, sticky="w", pady=(4, 0))
         tl = ttk.Label(left, text="Per scroll success (successes of one scroll type)", style="Section.TLabel")
         place(tl, sticky="w", pady=(8, 0))
         fr = ttk.Frame(left)
@@ -1164,6 +1361,11 @@ class ScrollCard(CardBase):
             ttk.Label(self.table, text=text, style="Section.TLabel", anchor="e").grid(
                 row=0, column=c, sticky="e", padx=(0, 6))
         self.table_rows = []
+        tabs = ttk.Frame(right)
+        ttk.Radiobutton(tabs, text="Cost table", value="cost", variable=self.view).pack(side="left")
+        ttk.Radiobutton(tabs, text="Scrolls used table", value="used", variable=self.view).pack(
+            side="left", padx=(10, 0))
+        place(tabs, sticky="w", pady=(8, 0))
         for name, title in (("cost", "Cost to get N successes (base items + scrolls)"),
                             ("used", "Scrolls used to get N successes")):
             tl = ttk.Label(right, text=title, style="Section.TLabel")
@@ -1291,6 +1493,10 @@ class ScrollCard(CardBase):
             "stop_streak": self.stop_streak.get(),
             "stop_total": self.stop_total.get(),
             "stop_at": self.stop_at.get(),
+            "goal": self.goal.get(),
+            "budget": self.budget.get(),
+            "collapsed": self.collapsed,
+            "starred": self.starred,
             "sections": [{"kind": KIND_BY_LABEL.get(sec["kind"].get(), "intermediate"),
                           "count": sec["count"].get(), "cost": sec["cost"].get()}
                          for sec in self.sections],
@@ -1307,6 +1513,8 @@ class ScrollCard(CardBase):
             self.stop_streak.set(d["stop_streak"])
             self.stop_total.set(d["stop_total"])
             self.stop_at.set(d["stop_at"])
+            self.goal.set(d["goal"])
+            self.budget.set(d["budget"])
             self.sections = []
             for sec in d["sections"]:
                 self._add_section_vars(sec["kind"], sec["count"], sec["cost"])
@@ -1314,9 +1522,11 @@ class ScrollCard(CardBase):
             self._updating = False
         self._rebuild_sections()
         self.recalc()
+        self._load_flags(d)
+        self._update_title()
 
     def has_data(self):
-        if any(v.get().strip() for v in (self.nick, self.equip, self.slots,
+        if any(v.get().strip() for v in (self.nick, self.equip, self.slots, self.goal, self.budget,
                                          self.stop_streak, self.stop_total, self.stop_at)):
             return True
         return len(self.sections) > 1 or any(
@@ -1326,6 +1536,96 @@ class ScrollCard(CardBase):
         wrap = int(300 * self.app.scale * self.app.zoom)
         for lbl in self.notes + [self.msg]:
             lbl.config(wraplength=wrap)
+
+    def recall(self, mem):
+        if mem.get("base") and not self.equip.get().strip():
+            self.equip.set(mem["base"])
+
+    def price_memory(self):
+        t = self.equip.get().strip()
+        return {"base": t} if t and parse_num(t) is not None else {}
+
+    def sort_key(self):
+        return (0 if self.starred else 1, 0)
+
+    def _on_view(self, *_):
+        self._apply_view()
+        if not self.app.suspend and not self._updating:
+            self.app.autosize()
+
+    def _apply_view(self):
+        """Show the cost table or the scrolls-used table (the tabs), not both."""
+        show = self.view.get()
+        for name, title in (("cost", self.bd_titles[1]), ("used", self.bd_titles[2])):
+            if self.report is None or "error" in self.report or name != show:
+                title.grid_remove()
+                self.bd_frames[name].grid_remove()
+            else:
+                title.grid()
+                self.bd_frames[name].grid()
+
+    # ---- presets ---------------------------------------------------------- #
+    def show_presets(self):
+        presets = self.app.presets()
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label="Save the current scrolls and rules as a preset...", command=self.save_preset)
+        m.add_separator()
+        names = sorted(presets, key=str.lower)
+        if names:
+            for name in names:
+                m.add_command(label=name, command=lambda n=name: self.apply_preset(n))
+            m.add_separator()
+            dm = tk.Menu(m, tearoff=0)
+            for name in names:
+                dm.add_command(label=name, command=lambda n=name: self.app.delete_preset(n))
+            m.add_cascade(label="Delete a preset", menu=dm)
+        else:
+            m.add_command(label="No presets saved yet", state="disabled")
+        x = self.preset_btn.winfo_rootx()
+        y = self.preset_btn.winfo_rooty() + self.preset_btn.winfo_height()
+        try:
+            m.tk_popup(x, y)
+        finally:
+            m.grab_release()
+
+    def preset_data(self):
+        st = self.get_state()
+        return {k: st[k] for k in ("slots", "sections", "stop_streak", "stop_total", "stop_at")}
+
+    def save_preset(self):
+        name = simpledialog.askstring(APP_NAME, "Name for this preset (scrolls, costs and restart rules):",
+                                      parent=self.winfo_toplevel())
+        if name and name.strip():
+            self.app.save_preset(name.strip()[:40], self.preset_data())
+
+    def apply_preset(self, name):
+        data = self.app.presets().get(name)
+        if not data:
+            return
+        self.app.commit_now()
+        self.load_state({**self.get_state(), **data})
+        self.app.commit_now()
+        self.app.autosize()
+
+    # ---- send to an item card -------------------------------------------- #
+    def send_to_item(self):
+        rep_ = self.report
+        if not rep_ or "error" in rep_:
+            messagebox.showinfo(APP_NAME, "Fill in the scroll simulator first.", parent=self.winfo_toplevel())
+            return
+        k = rep_["goal"]["k"]
+        row = rep_["rows"][k - 1]
+        if math.isinf(row["cost"]):
+            messagebox.showinfo(APP_NAME, f"{k} success{'' if k == 1 else 'es'} cannot be reached with these "
+                                "scrolls, so there is no cost to send.", parent=self.winfo_toplevel())
+            return
+        name = self.nick.get().strip() or "Equipment"
+        st = default_state("profit")
+        st.update({"nickname": f"{name} +{k}",
+                   "base": fmt_num(round(row["base"])) if row["base"] else "",
+                   "scrolls": "1",
+                   "scroll_price": fmt_num(round(row["cost"] - row["base"]))})
+        self.app.insert_card(self.index + 1, st)
 
     # ---- actions ---------------------------------------------------------- #
     def add_section(self):
@@ -1391,8 +1691,22 @@ class ScrollCard(CardBase):
             for tl in self.bd_titles:
                 tl.grid_remove()
             self.per_note.grid_remove()
+            self.summary_lbl.config(text="")
+            for lbl in self.goal_lbls.values():
+                lbl.config(text="\u2014")
+            self._set_summary("")
             return
         self.msg.config(text="", foreground=MUTED)
+        self.summary_lbl.config(text=rep["summary"])
+        g = rep["goal"]
+        self.goal_lbls["avg"].config(text=f"{fmt_items(g['items'])} items \u00b7 {short_num(g['cost'])}")
+        self.goal_lbls["p50"].config(text=f"{fmt_items(g['items50'])} items \u00b7 {short_num(g['cost50'])}")
+        self.goal_lbls["p90"].config(text=f"{fmt_items(g['items90'])} items \u00b7 {short_num(g['cost90'])}")
+        if g["budget_chance"] is not None:
+            self.goal_lbls["budget"].config(text=f"{fmt_chance(g['budget_chance'])} ({g['afford']} items)")
+        else:
+            self.goal_lbls["budget"].config(text="\u2014")
+        self._set_summary("" if math.isinf(g["cost"]) else f"{g['k']} succ.: {short_num(g['cost'])}")
         n = rep["n"]
         self.sum_lbls["slots"].config(text=f"{n} of {rep['slots']}")
         self.sum_lbls["destroy"].config(text=fmt_chance(rep["destroyed"]))
@@ -1406,8 +1720,7 @@ class ScrollCard(CardBase):
             "successes (counting the finished one); Duplicates = the others, which fail"
             + (", are destroyed or restart" if rep["rules"] or rep["destroyed"] > 0 else "")
             + ". The tables above price those copies and the scrolls used on all of them."))
-        for tl in self.bd_titles:
-            tl.grid()
+        self.bd_titles[0].grid()
         kinds = rep["kinds"]
         per = rep["by_kind"]
         head_cost = ["Successes", "Base items"] + [kind_header(k) for k in kinds] + ["Total"]
@@ -1428,6 +1741,7 @@ class ScrollCard(CardBase):
         self.per_note.grid()
         self._fill_grid("cost", head_cost, rows_cost)
         self._fill_grid("used", head_used, rows_used)
+        self._apply_view()
         for i, labels in enumerate(self.table_rows):
             if i < n:
                 row = rep["rows"][i]
@@ -1461,6 +1775,68 @@ def changelog_lines(text):
     return out
 
 
+def export_text(state):
+    """The results of every card as plain text (for pasting into chat or notes)."""
+    lines = [f"{APP_NAME} v{__version__} - {time.strftime('%Y-%m-%d %H:%M')}", ""]
+    for i, raw in enumerate(state.get("items", []), 1):
+        it = sanitize_card(raw)
+        name = it["nickname"].strip()
+        if it["type"] == "scroll":
+            head = f"Scrolls {i}" + (f" - {name}" if name else "")
+            rep_ = scroll_report(it)
+            if "error" in rep_:
+                lines += [head + ": (not filled in)", ""]
+                continue
+            lines += [head, "  " + rep_["summary"],
+                      f"  Average cost of one base item with its scrolls: {fmt_money(rep_['per_item'])}", ""]
+        else:
+            head = f"Item {i}" + (f" - {name}" if name else "")
+            r = compute(it)
+            if r["cost"] <= 0 and r["sale"] <= 0:
+                lines += [head + ": (empty)", ""]
+                continue
+            pct = "" if r["roi"] is None else f" ({r['roi']:,.2f}%)"
+            lines += [head, f"  Total cost: {fmt_num(r['cost'])}",
+                      f"  Break-even sale price: {fmt_num(r['break_even'])}",
+                      f"  Sale price: {fmt_num(r['sale'])}  (tax {round(r['rate'] * 100)}%: {fmt_num(r['tax'])})",
+                      f"  You receive: {fmt_num(r['net'])}",
+                      f"  Profit: {fmt_num(r['profit'])}{pct}", ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def export_csv(state):
+    """The results of every card as CSV text: one table for the items, one block per scroll simulator."""
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(["Item", "Name", "Total cost", "Break-even price", "Sale price", "Tax rate", "Tax paid",
+                "You receive", "Profit", "Profit %"])
+    scrolls = []
+    for i, raw in enumerate(state.get("items", []), 1):
+        it = sanitize_card(raw)
+        if it["type"] == "scroll":
+            scrolls.append((i, it))
+            continue
+        r = compute(it)
+        if r["cost"] <= 0 and r["sale"] <= 0:
+            continue
+        w.writerow([i, it["nickname"].strip(), round(r["cost"], 2), r["break_even"], round(r["sale"], 2),
+                    f"{round(r['rate'] * 100)}%", round(r["tax"], 2), round(r["net"], 2), round(r["profit"], 2),
+                    "" if r["roi"] is None else round(r["roi"], 2)])
+    for i, it in scrolls:
+        rep_ = scroll_report(it)
+        if "error" in rep_:
+            continue
+        w.writerow([])
+        w.writerow([f"Scroll simulator {i}", it["nickname"].strip(), "cost of 1 base item with scrolls",
+                    round(rep_["per_item"], 2)])
+        w.writerow(["Successes", "Exactly", "At least", "Base items", "Total cost"])
+        for row in rep_["rows"]:
+            w.writerow([row["k"], round(row["exact"], 6), round(row["atleast"], 6),
+                        "" if math.isinf(row["items"]) else round(row["items"], 2),
+                        "" if math.isinf(row["cost"]) else round(row["cost"], 2)])
+    return out.getvalue()
+
+
 def make_card(parent, app, index, state):
     """Build the right kind of card for a saved/default state."""
     cls = ScrollCard if isinstance(state, dict) and state.get("type") == "scroll" else Card
@@ -1492,6 +1868,15 @@ class App:
         self._fit_job = None
         self._last_size = None
         _cfg = load_settings()
+        apply_theme(_cfg.get("theme", "light"))
+        self.theme_var = tk.StringVar(master=root, value=THEME)
+        self.remember_prices = tk.BooleanVar(master=root, value=bool(_cfg.get("remember_prices", True)))
+        self.prices = {}                                 # nickname (lower case) -> remembered prices
+        if isinstance(_cfg.get("prices"), dict):
+            for k, v in _cfg["prices"].items():
+                if isinstance(k, str) and isinstance(v, dict):
+                    self.prices[k] = {a: b for a, b in v.items() if a in ("base", "scroll_price") and isinstance(b, str)}
+        self._prices_saved = json.dumps(self.prices, sort_keys=True)
         self.auto_resize = tk.BooleanVar(master=root, value=bool(_cfg.get("auto_resize", False)))
         _ok, _z = parse_zoom(_cfg.get("zoom", "auto"))
         self.manual_zoom = _z if _ok else None          # None = Auto (fit the window)
@@ -1534,6 +1919,8 @@ class App:
         style = ttk.Style(self.root)
         if sys.platform.startswith("linux") and "clam" in style.theme_names():
             style.theme_use("clam")
+        if THEME == "dark":
+            self._dark_style(style)
         base = tkfont.nametofont("TkDefaultFont")
         self.f_bold = _bumped(base, 0)
         self.f_title = _bumped(base, 2)
@@ -1552,6 +1939,33 @@ class App:
         style.configure("Section.TLabel", font=self.f_bold)
         self.default_fg = style.lookup("TLabel", "foreground") or "black"
         self.canvas_bg = style.lookup("TFrame", "background") or self.root.cget("bg")
+
+    def _dark_style(self, style):
+        """Colours for the dark theme (the plain 'clam' theme is the one that can be recoloured everywhere)."""
+        u = DARK_UI
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        self.root.configure(bg=u["win"])
+        style.configure(".", background=u["win"], foreground=u["fg"], fieldbackground=BG_OK,
+                        bordercolor=u["border"], lightcolor=u["win"], darkcolor=u["win"],
+                        troughcolor=BG_RO, focuscolor=u["win"], insertcolor=u["fg"])
+        style.configure("TButton", background=u["btn"], foreground=u["fg"], padding=3)
+        style.map("TButton", background=[("disabled", u["win"]), ("active", u["btn_active"])],
+                  foreground=[("disabled", u["dis"])])
+        style.configure("TCombobox", fieldbackground=BG_OK, background=u["btn"], foreground=ENTRY_FG,
+                        arrowcolor=u["fg"])
+        style.map("TCombobox", fieldbackground=[("readonly", BG_OK)], foreground=[("readonly", ENTRY_FG)],
+                  background=[("active", u["btn_active"])])
+        style.configure("TRadiobutton", background=u["win"], foreground=u["fg"])
+        style.map("TRadiobutton", background=[("active", u["win"])],
+                  indicatorcolor=[("selected", u["accent"]), ("!selected", BG_OK)])
+        style.configure("TScrollbar", background=u["btn"], troughcolor=u["win"], arrowcolor=u["fg"])
+        style.configure("TSeparator", background=u["border"])
+        try:
+            self.root.option_add("*TCombobox*Listbox.background", BG_OK)
+            self.root.option_add("*TCombobox*Listbox.foreground", ENTRY_FG)
+        except tk.TclError:
+            pass
 
     def _build_toolbar(self):
         bar = ttk.Frame(self.root, padding=(10, 8))
@@ -1585,6 +1999,13 @@ class App:
         self.zoom_in_btn.pack(side="left")
         self.status = ttk.Label(bar, text="", style="Muted.TLabel")
         self.status.pack(side="right")
+        ttk.Separator(self.root).pack(side="top", fill="x")
+        self.totals_bar = ttk.Frame(self.root, padding=(10, 4))   # totals over all items + the sort button
+        self.totals_bar.pack(side="top", fill="x")
+        self.sort_btn = ttk.Button(self.totals_bar, text="Sort by profit %", command=self.sort_cards)
+        self.sort_btn.pack(side="right")
+        self.totals = ttk.Label(self.totals_bar, text="", style="Muted.TLabel")
+        self.totals.pack(side="left")
         ttk.Separator(self.root).pack(side="top", fill="x")
 
     def _build_canvas(self):
@@ -1640,6 +2061,13 @@ class App:
 
     def _build_menu(self):
         menubar = tk.Menu(self.root)
+        self.sets_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Sets", menu=self.sets_menu)
+        self._rebuild_sets_menu()
+        export = tk.Menu(menubar, tearoff=0)
+        export.add_command(label="Copy results as text", command=self.copy_text)
+        export.add_command(label="Save results as CSV (opens in Excel)...", command=self.save_csv)
+        menubar.add_cascade(label="Export", menu=export)
         settings = tk.Menu(menubar, tearoff=0)
         settings.add_checkbutton(label="Auto-resize window when adding or removing items",
                                  variable=self.auto_resize, command=self._on_auto_resize_toggled)
@@ -1649,6 +2077,13 @@ class App:
                                       variable=self.zoom_var, value=label,
                                       command=lambda v=label: self.set_zoom_text(v))
         settings.add_cascade(label="Zoom", menu=zoom_menu)
+        theme_menu = tk.Menu(settings, tearoff=0)
+        for label, value in (("Light", "light"), ("Dark", "dark")):
+            theme_menu.add_radiobutton(label=label, variable=self.theme_var, value=value,
+                                       command=self._on_theme_changed)
+        settings.add_cascade(label="Theme (applies after restart)", menu=theme_menu)
+        settings.add_checkbutton(label="Remember prices by nickname", variable=self.remember_prices,
+                                 command=self._on_update_settings)
         settings.add_separator()
         settings.add_command(label="What's new (changelog)...", command=self.show_changelog)
         settings.add_separator()
@@ -1663,7 +2098,173 @@ class App:
 
     def _on_update_settings(self):
         save_settings({"check_updates": bool(self.check_updates.get()),
-                       "auto_install": bool(self.auto_install.get())})
+                       "auto_install": bool(self.auto_install.get()),
+                       "remember_prices": bool(self.remember_prices.get())})
+
+    def _on_theme_changed(self):
+        save_settings({"theme": self.theme_var.get()})
+        if self.theme_var.get() != THEME:
+            messagebox.showinfo(APP_NAME, "The new theme is used the next time you start the app.",
+                                parent=self.root)
+
+    # ---- sets (named groups of cards) ------------------------------------- #
+    def sets(self):
+        data = load_settings().get("sets")
+        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, dict)} \
+            if isinstance(data, dict) else {}
+
+    def _rebuild_sets_menu(self):
+        m = self.sets_menu
+        m.delete(0, "end")
+        m.add_command(label="Save the current cards as a set...", command=self.save_set)
+        names = sorted(self.sets(), key=str.lower)
+        m.add_separator()
+        if names:
+            for name in names:
+                m.add_command(label=f"Load: {name}", command=lambda n=name: self.load_set(n))
+            m.add_separator()
+            dm = tk.Menu(m, tearoff=0)
+            for name in names:
+                dm.add_command(label=name, command=lambda n=name: self.delete_set(n))
+            m.add_cascade(label="Delete a set", menu=dm)
+        else:
+            m.add_command(label="No sets saved yet", state="disabled")
+
+    def save_set(self):
+        self.commit_now()
+        name = simpledialog.askstring(APP_NAME, "Name for this set of cards:", parent=self.root)
+        if not name or not name.strip():
+            return
+        name = name.strip()[:40]
+        sets = self.sets()
+        if name in sets and not messagebox.askyesno(APP_NAME, f"Replace the set “{name}”?",
+                                                    icon="warning", default="no", parent=self.root):
+            return
+        sets[name] = self.get_state()
+        if save_settings({"sets": sets}):
+            self._rebuild_sets_menu()
+        else:
+            messagebox.showerror(APP_NAME, "Could not save the set.", parent=self.root)
+
+    def load_set(self, name):
+        state = self.sets().get(name)
+        if not state:
+            return
+        self.commit_now()
+        if any(c.has_data() for c in self.cards) and not messagebox.askyesno(
+                APP_NAME, f"Replace the cards on screen with the set “{name}”?\n\n"
+                "You can bring them back with Undo.", icon="warning", default="no", parent=self.root):
+            return
+        self._rebuild(state)
+        self.autosize()
+        self.commit_now()
+
+    def delete_set(self, name):
+        sets = self.sets()
+        if name in sets and messagebox.askyesno(APP_NAME, f"Delete the set “{name}”?", icon="warning",
+                                                default="no", parent=self.root):
+            del sets[name]
+            save_settings({"sets": sets})
+            self._rebuild_sets_menu()
+
+    # ---- presets (scroll mixes) ------------------------------------------- #
+    def presets(self):
+        data = load_settings().get("presets")
+        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, dict)} \
+            if isinstance(data, dict) else {}
+
+    def save_preset(self, name, data):
+        presets = self.presets()
+        if name in presets and not messagebox.askyesno(APP_NAME, f"Replace the preset “{name}”?",
+                                                       icon="warning", default="no", parent=self.root):
+            return
+        presets[name] = data
+        if not save_settings({"presets": presets}):
+            messagebox.showerror(APP_NAME, "Could not save the preset.", parent=self.root)
+
+    def delete_preset(self, name):
+        presets = self.presets()
+        if name in presets and messagebox.askyesno(APP_NAME, f"Delete the preset “{name}”?", icon="warning",
+                                                   default="no", parent=self.root):
+            del presets[name]
+            save_settings({"presets": presets})
+
+    # ---- export ----------------------------------------------------------- #
+    def copy_text(self):
+        self.commit_now()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(export_text(self.get_state()))
+        self.status.config(text="Copied results to the clipboard", foreground=MUTED)
+
+    def save_csv(self):
+        self.commit_now()
+        path = filedialog.asksaveasfilename(parent=self.root, defaultextension=".csv", title="Save results",
+                                            initialfile="merchant-simulator.csv",
+                                            filetypes=[("CSV (Excel)", "*.csv"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write(export_csv(self.get_state()))
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"Could not save the file:\n\n{exc}", parent=self.root)
+            return
+        self.status.config(text="Saved " + os.path.basename(path), foreground=MUTED)
+
+    # ---- remembered prices ------------------------------------------------ #
+    def recall_price(self, card):
+        if self.suspend or not self.remember_prices.get():
+            return
+        key = card.nick.get().strip().lower()
+        mem = self.prices.get(key) if key else None
+        if mem:
+            card.recall(mem)
+
+    def _remember_prices(self):
+        if not self.remember_prices.get():
+            return
+        for c in self.cards:
+            key = c.nick.get().strip().lower()
+            fields = c.price_memory() if key else {}
+            if fields:
+                self.prices.setdefault(key, {}).update(fields)
+        while len(self.prices) > 300:                    # forget the oldest names
+            self.prices.pop(next(iter(self.prices)))
+
+    def _flush_prices(self):
+        self._remember_prices()
+        now = json.dumps(self.prices, sort_keys=True)
+        if now != self._prices_saved and save_settings({"prices": self.prices}):
+            self._prices_saved = now
+
+    # ---- sorting and totals ----------------------------------------------- #
+    def sort_cards(self):
+        """Item cards by profit % (starred first); scroll simulators keep their places."""
+        self.commit_now()
+        slots = [i for i, c in enumerate(self.cards) if isinstance(c, Card)]
+        ordered = sorted((self.cards[i] for i in slots), key=lambda c: c.sort_key())
+        if [self.cards[i] for i in slots] == ordered:
+            return
+        for i, c in zip(slots, ordered):
+            self.cards[i] = c
+        self._renumber()
+        self._layout_cards(force=True, cols=self._cols or None)
+        self.commit_now()
+
+    def _update_totals(self):
+        n, cost, profit = 0, 0.0, 0.0
+        for c in self.cards:
+            r = getattr(c, "last", None)
+            if r and r["cost"] > 0:
+                n += 1
+                cost += r["cost"]
+                profit += r["profit"]
+        if not n:
+            self.totals.config(text="")
+            return
+        pct = f"  ({profit / cost * 100:,.1f}%)" if cost > 0 else ""
+        self.totals.config(text=f"{n} item{'' if n == 1 else 's'}  \u00b7  Total cost {fmt_money(cost)}"
+                                f"  \u00b7  Total profit {'+' if profit > 0.005 else ''}{fmt_money(profit)}{pct}")
 
     # ---- changelog -------------------------------------------------------- #
     def show_changelog(self):
@@ -2038,7 +2639,8 @@ class App:
         self.root.update_idletasks()
         min_h = int(420 * self.scale)
         w = cols * self.cw + sb_w + pad
-        h = self.toolbar.winfo_reqheight() + 2 + self.inner.winfo_reqheight() + pad
+        h = (self.toolbar.winfo_reqheight() + self.totals_bar.winfo_reqheight() + 4
+             + self.inner.winfo_reqheight() + pad)
         h = max(min_h, min(h, sh - 120))
         self._set_minsize()
         self.root.geometry(f"{w}x{h}")
@@ -2173,6 +2775,7 @@ class App:
             self.pending = None
         if self.suspend or not self.history:
             return
+        self._remember_prices()
         snap = self._snap()
         if snap != self.history[self.hidx]:
             del self.history[self.hidx + 1:]
@@ -2208,6 +2811,7 @@ class App:
         self.redo_btn.state(["!disabled" if can_redo else "disabled"])
         n = len(self.cards)
         self.add_btn.config(text=f"+ Add Item ({n})")
+        self._update_totals()
         if dirty:
             self.status.config(text="● Unsaved changes", foreground=AMBER)
         else:
@@ -2222,6 +2826,21 @@ class App:
         self.commit_now()
         self.autosize()
         self.root.after(60, lambda: self._scroll_to(card))
+
+    def insert_card(self, index, state):
+        """Add a card made from `state` at position `index`."""
+        self.commit_now()
+        card = make_card(self.inner, self, index, sanitize_card(state))
+        self.cards.insert(index, card)
+        self._renumber()
+        self.commit_now()
+        self.autosize()
+        self.root.after(60, lambda: self._scroll_to(card))
+
+    def duplicate_card(self, card):
+        state = copy.deepcopy(card.get_state())
+        state["starred"] = False
+        self.insert_card(self.cards.index(card) + 1, state)
 
     def remove_card(self, card):
         if len(self.cards) <= 1:
@@ -2265,6 +2884,7 @@ class App:
         except OSError as exc:
             messagebox.showerror(APP_NAME, f"Could not save your entries:\n\n{exc}", parent=self.root)
             return False
+        self._flush_prices()
         self.saved_json = self._snap()
         self.saved_text = "Saved at " + time.strftime("%I:%M %p").lstrip("0")
         self._refresh()
@@ -2279,6 +2899,7 @@ class App:
                 return
             if ans and not self.save():
                 return
+        self._flush_prices()
         self.root.destroy()
 
 
@@ -2296,7 +2917,7 @@ def selftest(out_path):
     _DATA_FILE_OVERRIDE = os.path.join(tempfile.mkdtemp(), "entries.json")
     msg, code, root = "OK", 0, None
     import faulthandler
-    global messagebox
+    global messagebox, simpledialog
     try:                          # a hang becomes a failure that shows where it was stuck
         hang_log = open(out_path, "w", encoding="utf-8")
         faulthandler.dump_traceback_later(150, exit=True, file=hang_log)
@@ -2305,7 +2926,7 @@ def selftest(out_path):
 
     def _no_dialog(*a, **k):      # a dialog would wait for a click nobody can make
         raise AssertionError("unexpected dialog during self-test: %r" % (a[:1],))
-    real_messagebox = messagebox
+    real_messagebox, real_simpledialog = messagebox, simpledialog
     messagebox = types.SimpleNamespace(askyesno=_no_dialog, askyesnocancel=_no_dialog, showerror=_no_dialog)
     try:
         for roi, want in ((None, None), (-0.01, "grave"), (0, None), (0.01, "copper_coin"),
@@ -2602,12 +3223,136 @@ def selftest(out_path):
         assert app.get_state() == state_now, "undo/redo lost the scroll simulator"
         assert isinstance(app.cards[0], ScrollCard), "scroll simulator type lost after undo/redo"
 
+        # --- 1.7.0: break-even, duplicate, fold, star, sort, totals, memory, export, sets, presets, goal, theme
+        strict = messagebox
+        messagebox = types.SimpleNamespace(askyesno=lambda *a, **k: True, askyesnocancel=lambda *a, **k: True,
+                                           showerror=_no_dialog, showinfo=lambda *a, **k: None)
+        said_name = {"v": "Set one"}
+        simpledialog = types.SimpleNamespace(askstring=lambda *a, **k: said_name["v"])
+        try:
+            assert compute({"base": "1000", "tax": "3%", "mode": "price", "sale_price": "0"})["break_even"] == 1031
+            assert compute({"base": "1000", "tax": "5%", "mode": "price"})["break_even"] == 1053
+            apply_theme("dark")
+            assert BG_OK == "#2d333b" and lighten("#000000") == "#8c8c8c" and THEME == "dark"
+            apply_theme("light")
+            assert BG_OK == "#ffffff" and THEME == "light"
+
+            app.add_card()
+            pc = app.cards[-1]
+            pc.nick.set("Cape")
+            pc.base.set("1m")
+            pc.scrolls.set("2")
+            pc.sprice.set("100k")
+            pc.sale.set("1.5m")
+            root.update()
+            assert pc.be_lbl.cget("text") == "1,237,114", "break-even was " + pc.be_lbl.cget("text")
+            app.commit_now()
+            assert "Total cost" in app.totals.cget("text"), "totals line is empty"
+
+            n = len(app.cards)
+            app.duplicate_card(pc)
+            dup = app.cards[pc.index + 1]
+            assert len(app.cards) == n + 1 and dup.get_state()["nickname"] == "Cape" and dup is not pc
+            dup.toggle_star()
+            assert dup.starred and dup.get_state()["starred"] is True
+            app.sort_cards()
+            first = [c for c in app.cards if isinstance(c, Card)][0]
+            assert first is dup, "a starred item should sort first"
+            pc.toggle_collapse()
+            assert pc.collapsed and pc.get_state()["collapsed"] is True and pc.sum_lbl.cget("text"), "fold failed"
+            pc.toggle_collapse()
+            assert not pc.collapsed
+            app.commit_now()
+            keep = app.get_state()
+            app.undo()
+            app.redo()
+            assert app.get_state() == keep, "undo/redo lost the new card settings"
+            pc = next(c for c in app.cards if isinstance(c, Card) and c.nick.get() == "Cape" and not c.starred)
+            assert sanitize_item({"collapsed": "yes", "starred": 1})["collapsed"] is False
+
+            app.add_card()
+            nc = app.cards[-1]
+            nc.nick.set("cape")
+            app.recall_price(nc)
+            assert nc.base.get() == pc.base.get() and nc.sprice.get() == pc.sprice.get(), "remembered price missing"
+            app.remember_prices.set(False)
+            nc2 = Card(app.inner, app, 99, default_state("profit"))
+            nc2.nick.set("cape")
+            app.recall_price(nc2)
+            assert not nc2.base.get(), "price memory should be switchable off"
+            nc2.destroy()
+            app.remember_prices.set(True)
+
+            txt = export_text(app.get_state())
+            assert "Cape" in txt and "Break-even sale price" in txt, txt
+            rows = list(csv.reader(io.StringIO(export_csv(app.get_state()))))
+            assert rows[0][0] == "Item" and any("Cape" in r for r in rows), rows
+
+            said_name["v"] = "Set one"
+            app.save_set()
+            assert "Set one" in app.sets(), "set not saved"
+            app.add_card()
+            app.load_set("Set one")
+            assert len(app.cards) == len(app.sets()["Set one"]["items"]), "set did not replace the cards"
+            app.delete_set("Set one")
+            assert "Set one" not in app.sets()
+
+            sc = next(c for c in app.cards if isinstance(c, ScrollCard))
+            while len(sc.sections) > 1:
+                sc.remove_section(1)
+            sc.sections[0]["kind"].set(SCROLL_KINDS["intermediate"][0])
+            sc.sections[0]["count"].set("1")
+            sc.sections[0]["cost"].set("100")
+            sc.slots.set("")
+            sc.equip.set("1000")
+            for v in (sc.stop_streak, sc.stop_total, sc.stop_at):
+                v.set("")
+            sc.goal.set("1")
+            sc.budget.set("2200")
+            root.update()
+            g = scroll_report(sc.get_state())["goal"]
+            assert g["items50"] == 1.0 and g["items90"] == 3.0 and abs(g["budget_chance"] - 0.84) < 1e-9, g
+            assert "error" in scroll_report(dict(sc.get_state(), goal="5")), "goal above the scrolls should be refused"
+            assert "1 success" in sc.summary_lbl.cget("text"), sc.summary_lbl.cget("text")
+            sc.view.set("used")
+            root.update()
+            sc.view.set("cost")
+            said_name["v"] = "Mix A"
+            sc.sections[0]["count"].set("1")
+            sc.save_preset()
+            assert "Mix A" in app.presets(), "preset not saved"
+            sc.sections[0]["cost"].set("5")
+            sc.apply_preset("Mix A")
+            assert sc.sections[0]["cost"].get() == "100", "preset not applied"
+            app.delete_preset("Mix A")
+            assert "Mix A" not in app.presets()
+
+            n = len(app.cards)
+            sc.send_to_item()
+            sent = app.cards[sc.index + 1]
+            assert len(app.cards) == n + 1 and isinstance(sent, Card), "send to item card failed"
+            assert sent.base.get() == "1,667" and "+1" in sent.nick.get(), (sent.base.get(), sent.nick.get())
+            sc.toggle_collapse()
+            assert sc.sum_lbl.cget("text"), "folded scroll card has no summary"
+            sc.toggle_collapse()
+
+            app.theme_var.set("dark")
+            app._on_theme_changed()
+            assert load_settings().get("theme") == "dark"
+            app.theme_var.set("light")
+            app._on_theme_changed()
+            app._flush_prices()
+            assert "cape" in load_settings().get("prices", {}), "prices were not saved"
+        finally:
+            messagebox = strict
+            simpledialog = real_simpledialog
+
         assert app.save() and os.path.exists(data_file()), "save failed"
         root.update()
     except BaseException:
         msg, code = traceback.format_exc(), 1
     finally:
-        messagebox = real_messagebox
+        messagebox, simpledialog = real_messagebox, real_simpledialog
         try:
             faulthandler.cancel_dump_traceback_later()
             if hang_log:

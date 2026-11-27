@@ -9,6 +9,33 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-26
+
+### Added
+- **Item cards:** a **Break-even sale price** (the lowest price with no loss, after tax), and three
+  buttons under the title: **Star** (starred items sort first), **Duplicate** (copy an item with
+  all its entries) and **Collapse / Expand** (fold a card down to its title line, which then shows
+  the profit and profit %).
+- **Totals and sorting:** a line under the toolbar adds up total cost and total profit over all
+  items, and **Sort by profit %** puts the best items first (starred first; scroll simulators keep
+  their places).
+- **Scroll Simulator:**
+  - A one-sentence summary of what you can expect.
+  - **Goal and budget:** pick the number of successes you want (blank = every scroll succeeds) and
+    optionally a budget. It shows the average, how many base items and how much it costs "half the
+    time" and "9 times in 10", and the chance of reaching the goal within your budget. The costs of
+    those two use the average cost of a base item, so they are close, not exact.
+  - **Presets:** save a mix of scrolls, costs and restart rules and load it again later.
+  - **Send to item card:** creates an item card with the average base item and scroll spending
+    needed for your goal.
+  - The cost table and the scrolls-used table are now tabs, so the card is shorter.
+- **Sets** menu: save all your cards under a name and load them again later (for example
+  "Cape runs"). Loading can be undone.
+- **Export** menu: copy the results as text, or save them as a CSV file that opens in Excel.
+- **Remember prices by nickname** (Settings, on by default): type a nickname you used before and
+  the base item and scroll prices are filled in if those boxes are empty.
+- **Settings > Theme:** light or dark (applies the next time you start the app).
+
 ## [1.6.0] - 2026-11-25
 
 Everything since 1.5.0 (versions 1.5.1 to 1.8.0 were never published separately).
@@ -204,7 +231,8 @@ First release.
   build and test, or tick it to create the version tag and publish the release automatically.
 - `SHA256SUMS.txt` checksums attached to every release.
 
-[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/HimekoTachibana/MSCW-Profit-Calculator/compare/v1.3.2...v1.4.0
