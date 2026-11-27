@@ -96,7 +96,7 @@ jobs:
           python tests/test_updater.py
           if ($LASTEXITCODE -ne 0) { exit 1 }
           python scripts/embed_changelog.py
-          pyinstaller --onefile --windowed --icon assets/icon.ico --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
+          pyinstaller --onefile --windowed --icon assets/icon.ico --hidden-import icons_data --hidden-import changelog_data --hidden-import guide_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
           Move-Item dist/MSCW-Merchant-Simulator.exe "${{ env.ASSET }}"
       - name: Self-test the built app (Windows)
         timeout-minutes: 5
@@ -118,7 +118,7 @@ jobs:
           python -m pip install "pyinstaller>=6.10,<7" certifi
           python tests/test_updater.py
           python scripts/embed_changelog.py
-          pyinstaller --windowed --icon assets/icon.icns --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
+          pyinstaller --windowed --icon assets/icon.icns --hidden-import icons_data --hidden-import changelog_data --hidden-import guide_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
           codesign --force --deep --sign - dist/MSCW-Merchant-Simulator.app
           codesign --verify --deep --strict dist/MSCW-Merchant-Simulator.app
           ditto -c -k --sequesterRsrc --keepParent dist/MSCW-Merchant-Simulator.app "${{ env.ASSET }}"
@@ -141,7 +141,7 @@ jobs:
           pip install "pyinstaller>=6.10,<7" certifi
           python tests/test_updater.py
           python scripts/embed_changelog.py
-          pyinstaller --onefile --hidden-import icons_data --hidden-import changelog_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
+          pyinstaller --onefile --hidden-import icons_data --hidden-import changelog_data --hidden-import guide_data --hidden-import updater --hidden-import certifi --name MSCW-Merchant-Simulator mscw_merchant_simulator.py
           tar -czf "${{ env.ASSET }}" -C dist MSCW-Merchant-Simulator
       - name: Self-test the built app (Linux)
         if: runner.os == 'Linux'

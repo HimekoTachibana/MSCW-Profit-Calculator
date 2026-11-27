@@ -12,6 +12,9 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 ## [1.7.3] - 2026-11-27
 
 ### Added
+- **Settings > How to use (README)** (or press **F1**) opens a full guide inside the app: every
+  card, button, menu and setting, how to read the Scroll Simulator numbers, and the best ways to
+  use it. The README on GitHub has the same guide.
 - Scroll Simulator **Goal** tab: **Finished items wanted** (blank = 1) and, with a budget, how many
   finished items you can expect to get for it: the chance of reaching the number you want, the
   average, and the number you are 9 times in 10 sure to reach. "Half the time" and "9 times in 10"

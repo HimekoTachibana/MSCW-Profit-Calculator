@@ -1869,6 +1869,42 @@ def changelog_lines(text):
     return out
 
 
+def guide_lines(text):
+    """The how-to-use text (a small subset of Markdown) -> [(tag, text)]: headings, bullets (two levels),
+    numbered items and paragraphs. Lines that continue a bullet or paragraph are joined to it."""
+    out, cur = [], None
+
+    def flush():
+        nonlocal cur
+        if cur:
+            out.append((cur[0], cur[1]))
+        cur = None
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            flush()
+        elif line.startswith("<!--") or line.startswith("# "):
+            flush()
+        elif line.startswith("### "):
+            flush()
+            out.append(("h3", line[4:]))
+        elif line.startswith("## "):
+            flush()
+            out.append(("h2", line[3:]))
+        else:
+            m = re.match(r"^(\s*)(-|\d+\.)\s+(.*)$", line)
+            if m:
+                flush()
+                mark = "\u2022" if m.group(2) == "-" else m.group(2)
+                cur = ["bullet2" if len(m.group(1)) >= 2 else "bullet", f"{mark} {m.group(3)}"]
+            elif cur:
+                cur[1] += " " + line.strip()
+            else:
+                cur = ["", line.strip()]
+    flush()
+    return out
+
+
 def export_text(state):
     """The results of every card as plain text (for pasting into chat or notes)."""
     lines = [f"{APP_NAME} v{__version__} - {time.strftime('%Y-%m-%d %H:%M')}", ""]
@@ -1978,7 +2014,7 @@ class App:
         self.check_updates = tk.BooleanVar(master=root, value=bool(_cfg.get("check_updates", True)))
         self.auto_install = tk.BooleanVar(master=root, value=bool(_cfg.get("auto_install", False)))
         self._update_busy = False
-        self._changelog_win = None
+        self._text_wins = {}                              # open Help / What's new windows by name
 
         self._setup_style()
         self._load_icons()
@@ -2144,6 +2180,7 @@ class App:
             self.key_handlers[ch.lower()] = handler
 
         self.key_handlers = {}
+        bind("<F1>", self.show_guide)
         letter("z", self.undo, self.redo)            # Ctrl+Z undo, Ctrl+Shift+Z redo
         if not self.mac:
             letter("y", self.redo)
@@ -2186,6 +2223,7 @@ class App:
         settings.add_checkbutton(label="Remember prices by nickname", variable=self.remember_prices,
                                  command=self._on_update_settings)
         settings.add_separator()
+        settings.add_command(label="How to use (README)...", accelerator="F1", command=self.show_guide)
         settings.add_command(label="What's new (changelog)...", command=self.show_changelog)
         settings.add_separator()
         settings.add_command(label=f"Check for updates now (you have v{__version__})",
@@ -2414,12 +2452,52 @@ class App:
         self.totals.config(text=f"{n} item{'' if n == 1 else 's'}  \u00b7  Total cost {fmt_money(cost)}"
                                 f"  \u00b7  Total profit {'+' if profit > 0.005 else ''}{fmt_money(profit)}{pct}")
 
-    # ---- changelog -------------------------------------------------------- #
+    # ---- changelog and guide ---------------------------------------------- #
+    def _show_text(self, key, title, lines, size="760x560"):
+        """A scrollable read-only window of (tag, text) lines; opening it again just raises it."""
+        win = self._text_wins.get(key)
+        if win is not None and win.winfo_exists():
+            win.lift()
+            return
+        win = tk.Toplevel(self.root)
+        self._text_wins[key] = win
+        win.title(f"{APP_NAME} - {title}")
+        win.geometry(size)
+        box = ttk.Frame(win)
+        box.pack(fill="both", expand=True)
+        box.columnconfigure(0, weight=1)
+        box.rowconfigure(0, weight=1)
+        view = tk.Text(box, wrap="word", padx=14, pady=10, relief="flat", borderwidth=0,
+                       bg=BG_OK, fg=ENTRY_FG, insertbackground=ENTRY_FG)
+        bar = ttk.Scrollbar(box, orient="vertical", command=view.yview)
+        view.config(yscrollcommand=bar.set)
+        view.grid(row=0, column=0, sticky="nsew")
+        bar.grid(row=0, column=1, sticky="ns")
+        view.tag_configure("h2", font=self.f_title, spacing1=14, spacing3=2)
+        view.tag_configure("h3", font=self.f_bold, spacing1=6)
+        view.tag_configure("bullet", lmargin1=12, lmargin2=26, spacing1=2)
+        view.tag_configure("bullet2", lmargin1=34, lmargin2=48, spacing1=2)
+        view.tag_configure("cont", lmargin1=26, lmargin2=26)
+        view.tag_configure("", spacing1=4)
+        view.tag_configure("b", font=self.f_bold)
+        view.tag_configure("code", font="TkFixedFont")
+        for kind, body in lines:
+            if kind in ("h2", "h3"):
+                view.insert("end", body + "\n", kind)
+                continue
+            for part in re.split(r"(\*\*.+?\*\*|`[^`]+`)", body):
+                if part.startswith("**") and part.endswith("**") and len(part) > 4:
+                    view.insert("end", part[2:-2], (kind, "b"))
+                elif part.startswith("`") and part.endswith("`") and len(part) > 2:
+                    view.insert("end", part[1:-1], (kind, "code"))
+                elif part:
+                    view.insert("end", part, kind)
+            view.insert("end", "\n", kind)
+        view.config(state="disabled")
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 8))
+
     def show_changelog(self):
         """Settings > What's new: the changelog of this version and every one before it."""
-        if self._changelog_win is not None and self._changelog_win.winfo_exists():
-            self._changelog_win.lift()
-            return
         try:
             from changelog_data import CHANGELOG as text
         except Exception:
@@ -2427,28 +2505,17 @@ class App:
                                 f"You can read it on the Releases page:\n{updater.RELEASES_PAGE if updater else ''}",
                                 parent=self.root)
             return
-        win = tk.Toplevel(self.root)
-        self._changelog_win = win
-        win.title(f"{APP_NAME} - What's new")
-        win.geometry("760x560")
-        box = ttk.Frame(win)
-        box.pack(fill="both", expand=True)
-        box.columnconfigure(0, weight=1)
-        box.rowconfigure(0, weight=1)
-        view = tk.Text(box, wrap="word", padx=14, pady=10, relief="flat", borderwidth=0)
-        bar = ttk.Scrollbar(box, orient="vertical", command=view.yview)
-        view.config(yscrollcommand=bar.set)
-        view.grid(row=0, column=0, sticky="nsew")
-        bar.grid(row=0, column=1, sticky="ns")
-        view.tag_configure("h2", font=self.f_title, spacing1=14, spacing3=2)
-        view.tag_configure("h3", font=self.f_bold, spacing1=6)
-        view.tag_configure("bullet", lmargin1=12, lmargin2=26)
-        view.tag_configure("cont", lmargin1=26, lmargin2=26)
-        for line in changelog_lines(text):
-            kind, body = line
-            view.insert("end", body + "\n", kind)
-        view.config(state="disabled")
-        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 8))
+        self._show_text("changelog", "What's new", changelog_lines(text))
+
+    def show_guide(self):
+        """Settings > How to use (F1): the guide from the README."""
+        try:
+            from guide_data import GUIDE as text
+        except Exception:
+            messagebox.showinfo(APP_NAME, "The guide is not included in this copy of the app.\n\n"
+                                "It is the README on the project's GitHub page.", parent=self.root)
+            return
+        self._show_text("guide", "How to use", guide_lines(text), "840x680")
 
     # ---- updates ---------------------------------------------------------- #
     def check_for_updates(self, manual=False):
@@ -3246,9 +3313,16 @@ def selftest(out_path):
             assert changelog_data.CHANGELOG.count("## [") >= 5 and __version__ in changelog_data.CHANGELOG, \
                 "the bundled changelog does not mention this version"
             app.show_changelog()
-            assert app._changelog_win is not None, "changelog window was not opened"
-            app._changelog_win.destroy()
-            app._changelog_win = None
+            assert "changelog" in app._text_wins, "changelog window was not opened"
+            app._text_wins.pop("changelog").destroy()
+            from guide_data import GUIDE
+            glines = guide_lines(GUIDE)
+            assert len(glines) > 40 and glines[0][0] == "h2", "the how-to-use text did not load"
+            assert not any(t == "" and b.startswith(("-", "<!--")) for t, b in glines), "guide parsing went wrong"
+            assert any(t == "bullet2" for t, _ in glines) and all(b.strip() for _, b in glines)
+            app.show_guide()
+            assert "guide" in app._text_wins, "guide window was not opened"
+            app._text_wins.pop("guide").destroy()
         app.check_updates.set(False)
         app._on_update_settings()
         assert load_settings().get("check_updates") is False and load_settings().get("zoom") == "auto", \
