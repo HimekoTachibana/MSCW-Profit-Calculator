@@ -58,6 +58,15 @@ Each item card works out what an item costs to make and what you keep when you s
   in**: the **sale price**, the **profit**, or the **profit %**. The other two boxes (grey) are
   worked out for you. Typing a profit % is the quickest way to find the price you must charge to hit
   a target.
+- **Crafts (how many)**: how many of this item you make (blank = 1). Under the results you also see
+  the total cost, tax and profit for all of them, and the totals line counts every craft.
+- **Round price up**: when the price is worked out from a profit or profit %, round it up to the
+  next 100, 1,000 or 10,000 (rounding up only ever adds profit). **Use this price as my sale price**
+  copies the worked-out price into the Sale price box and switches the card to "Sale price".
+- **Market price now (optional)**: type what the item sells for right now to see your **profit at
+  the market price**, and a note such as "16% above market - may sell slowly" or "8% under market".
+- **Headline strip**: at the top of Results, four tiles for one item: **Your price - Shop fee - Your
+  cost = Profit**, with the return % under the profit.
 - **Results**: the **break-even sale price** (the lowest price with no loss, after tax), the **tax
   paid**, **what you receive after tax**, the **profit**, and the **return on cost** (profit divided
   by total cost).
@@ -197,6 +206,8 @@ end up with an item that has N successful scrolls?"* Scroll rates follow MeowDB'
 - The download is checked against the release's SHA-256 checksum and thrown away if it does not
   match. Only the downloaded apps can update themselves; running from source just shows the download
   page.
+- Only official releases of this repository are ever offered. Test builds (pre-releases) and copies
+  from other branches or forks are never installed by the updater.
 - If the app does not come back after an update on Windows, a log of what happened is at
   `%TEMP%\MSCW-Merchant-Simulator-update.log`.
 

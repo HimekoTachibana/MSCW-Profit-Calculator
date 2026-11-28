@@ -46,6 +46,12 @@ def opener(url,timeout):
     if url==base+u.SUMS_NAME: return R(sums)
     raise OSError("404 "+url)
 info=u.fetch_latest(opener=opener); assert info["version"]=="9.9.9" and name in info["assets"]
+for bad in ({"prerelease":True},{"draft":True}):
+    API2=dict(API,**bad)
+    try: u.fetch_latest(opener=lambda url,t,A=API2: R(json.dumps(A).encode())); raise SystemExit("pre-release accepted")
+    except u.UpdateError: pass
+API3=dict(API,assets=[{"name":name,"browser_download_url":"https://evil.example/"+name}])
+assert u.fetch_latest(opener=lambda url,t: R(json.dumps(API3).encode()))["assets"]=={}, "foreign host accepted"
 d=tempfile.mkdtemp(); seen=[]
 p=u.prepare(info,d,progress=lambda a,b:seen.append((a,b)),opener=opener)
 assert open(p,"rb").read()==payload and seen[-1]==(300000,300000)

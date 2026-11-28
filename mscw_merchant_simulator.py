@@ -59,11 +59,14 @@ except Exception:  # pragma: no cover - the app still works without update suppo
 UPDATES_ENABLED = True       # selftest() switches this off so it never touches the network
 ICON_PX = getattr(icons_data, "SMALL_SIZE", 32)   # size of the profit picture beside the percentage
 
-__version__ = "1.7.4"   # single source of truth - keep in sync with CHANGELOG.md
+__version__ = "1.8.0-test.1"   # single source of truth - keep in sync with CHANGELOG.md
 
 APP_NAME = "MSCW Merchant Simulator"
 MAX_MATERIALS = 5
 TAX_CHOICES = ("3%", "5%")
+ROUND_CHOICES = {"none": ("No rounding", 0), "100": ("Up to 100", 100),
+                 "1000": ("Up to 1,000", 1000), "10000": ("Up to 10,000", 10000)}
+ROUND_BY_LABEL = {v[0]: k for k, v in ROUND_CHOICES.items()}
 BASE_CARD_W = 340
 HISTORY_LIMIT = 300
 COMMIT_DELAY_MS = 450
@@ -124,6 +127,9 @@ DEFAULT_STATE = {
     "sale_price": "",
     "target_profit": "",
     "target_pct": "",
+    "qty": "1",               # how many of this item you craft (blank = 1)
+    "market": "",             # optional: what it sells for right now
+    "round": "none",          # round a worked-out sale price UP: "none", "100", "1000", "10000"
     "collapsed": False,       # card folded to its title line
     "starred": False,         # starred items sort first
 }
@@ -188,13 +194,23 @@ def compute(d):
         sale = max(0, math.ceil(cost * (1 + num("target_pct") / 100.0) / (1 - rate) - 1e-9))
     else:
         sale = num("sale_price")
+    step = ROUND_CHOICES.get(d.get("round"), ("", 0))[1]
+    if step and mode in ("profit", "percent") and sale > 0:
+        sale = math.ceil(sale / step - 1e-9) * step         # rounding up only ever adds profit
 
     tax = sale * rate
     net = sale - tax
     profit = net - cost
     roi = (profit / cost * 100.0) if cost > 0 else None
     break_even = max(0, math.ceil(cost / (1 - rate) - 1e-9)) if cost > 0 else 0     # lowest price with no loss
-    return {"break_even": break_even, "base": base, "scroll_total": scroll_total, "mat_total": mat_total,
+    q = num("qty")
+    qty = int(q) if q >= 1 else 1
+    market = num("market")
+    market_profit = market * (1 - rate) - cost if market > 0 else None
+    market_diff = (sale / market - 1) * 100.0 if market > 0 and sale > 0 else None   # % above (+) / under (-)
+    return {"qty": qty, "total_cost": cost * qty, "total_profit": profit * qty, "total_tax": tax * qty,
+            "market": market, "market_profit": market_profit, "market_diff": market_diff,
+            "break_even": break_even, "base": base, "scroll_total": scroll_total, "mat_total": mat_total,
             "cost": cost, "rate": rate, "sale": sale, "tax": tax, "net": net,
             "profit": profit, "roi": roi}
 
@@ -239,6 +255,11 @@ def sanitize_item(d):
         out["tax"] = d["tax"]
     if d.get("mode") in ("price", "profit", "percent"):
         out["mode"] = d["mode"]
+    for k in ("qty", "market"):
+        if isinstance(d.get(k), str):
+            out[k] = d[k]
+    if d.get("round") in ROUND_CHOICES:
+        out["round"] = d["round"]
     out["collapsed"] = d.get("collapsed") is True
     out["starred"] = d.get("starred") is True
     mats = []
@@ -904,15 +925,33 @@ class Card(CardBase):
         V = tk.StringVar
         self.nick, self.base, self.scrolls, self.sprice = V(), V(), V(), V()
         self.sale, self.target, self.pct, self.total = V(), V(), V(), V()
+        self.qty, self.market, self.round = V(value="1"), V(), V(value="none")
+        self.round_text = V(value=ROUND_CHOICES["none"][0])
         self.tier_key = None
         self.last = None         # result of the latest calculation (None while a field is invalid)
         self.tax, self.mode = V(value="3%"), V(value="price")
         for v in (self.nick, self.base, self.scrolls, self.sprice,
-                  self.sale, self.target, self.pct, self.tax, self.mode):
+                  self.sale, self.target, self.pct, self.tax, self.mode,
+                  self.qty, self.market, self.round):
             v.trace_add("write", self._on_var)
+        self.round_text.trace_add("write", self._on_round_text)
 
         self._build()
         self.load_state(state)
+
+    def _on_round_text(self, *_):
+        key = ROUND_BY_LABEL.get(self.round_text.get(), "none")
+        if self.round.get() != key:
+            self.round.set(key)
+
+    def use_suggested(self):
+        """Turn the worked-out sale price into the typed one (switches to 'Sale price')."""
+        if not self.last or self.mode.get() == "price":
+            return
+        self.app.commit_now()
+        self.sale.set(fmt_num(self.last["sale"]))
+        self.mode.set("price")
+        self.app.commit_now()
 
     # ---- widgets ---------------------------------------------------------- #
     def _build(self):
@@ -957,6 +996,7 @@ class Card(CardBase):
 
         field("Nickname", self.nick, "text")
         self._bind_recall(self.entries[-1][0])
+        field("Crafts (how many)", self.qty, "int", width=8)
         sep()
 
         section("Costs")
@@ -996,13 +1036,46 @@ class Card(CardBase):
         self.sale_lbl, self.sale_entry = field("Preferred sale price", self.sale, "cost")
         self.target_lbl, self.target_entry = field("Preferred profit", self.target, "signed")
         self.pct_lbl, self.pct_entry = field("Preferred profit %", self.pct, "signed")
+        self.round_lbl = ttk.Label(body, text="Round price up")
+        self.round_lbl.grid(row=r, column=0, sticky="w", pady=1, padx=(0, 8))
+        self.round_box = ttk.Combobox(body, state="readonly", width=14, textvariable=self.round_text,
+                                      values=[v[0] for v in ROUND_CHOICES.values()])
+        self.round_box.grid(row=r, column=1, sticky="e", pady=1)
+        r += 1
+        self.use_btn = ttk.Button(body, text="Use this price as my sale price", command=self.use_suggested)
+        self.use_btn.grid(row=r, column=0, columnspan=2, sticky="e", pady=(3, 1))
+        r += 1
+        self.market_lbl, self.market_entry = field("Market price now (optional)", self.market, "cost")
         sep()
 
         section("Results")
+        # headline strip:  Your price - Shop fee - Your cost = Profit  (for ONE item)
+        strip = ttk.Frame(body)
+        strip.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        r += 1
+        self.tiles = {}
+        for col, (key, cap) in enumerate((("price", "Your price"), ("fee", "Shop fee"),
+                                          ("cost", "Your cost"), ("profit", "Profit"))):
+            strip.columnconfigure(col * 2, weight=1, uniform="tile")
+            if col:
+                ttk.Label(strip, text="=" if key == "profit" else "\u2212").grid(row=0, column=col * 2 - 1, rowspan=2, padx=2)
+            ttk.Label(strip, text=cap, style="Muted.TLabel", anchor="center").grid(row=0, column=col * 2, sticky="ew")
+            v = ttk.Label(strip, text="\u2014", anchor="center", font=app.f_big if key == "profit" else app.f_bold)
+            v.grid(row=1, column=col * 2, sticky="ew")
+            self.tiles[key] = v
+        self.tile_pct = ttk.Label(strip, text="", style="Muted.TLabel", anchor="center")
+        self.tile_pct.grid(row=2, column=6, sticky="ew")
         self.be_lbl = result("Break-even sale price")
         self.tax_lbl = result("Tax paid")
         self.net_lbl = result("You receive after tax")
         self.profit_lbl = result("Profit", big=True)
+        self.mprofit_lbl = result("Profit at market price")
+        self.chip = ttk.Label(body, text="", anchor="e", justify="right", wraplength=int(300 * app.scale))
+        self.chip.grid(row=r, column=0, columnspan=2, sticky="e", pady=1)
+        r += 1
+        self.crafts_lbl = ttk.Label(body, text="", style="Muted.TLabel", justify="left", wraplength=int(300 * app.scale))
+        self.crafts_lbl.grid(row=r, column=0, columnspan=2, sticky="w", pady=1)
+        r += 1
         ttk.Label(body, text="Return on cost").grid(row=r, column=0, sticky="w", pady=1)
         roi_f = ttk.Frame(body)                      # [picture] [verdict] [profit %]
         roi_f.grid(row=r, column=1, sticky="e", pady=1)
@@ -1057,6 +1130,9 @@ class Card(CardBase):
             "sale_price": self.sale.get(),
             "target_profit": self.target.get(),
             "target_pct": self.pct.get(),
+            "qty": self.qty.get(),
+            "market": self.market.get(),
+            "round": self.round.get(),
             "collapsed": self.collapsed,
             "starred": self.starred,
         }
@@ -1074,6 +1150,10 @@ class Card(CardBase):
             self.pct.set(d["target_pct"])
             self.tax.set(d["tax"])
             self.mode.set(d["mode"])
+            self.qty.set(d["qty"])
+            self.market.set(d["market"])
+            self.round.set(d["round"])
+            self.round_text.set(ROUND_CHOICES[d["round"]][0])
             self.mats = []
             for m in d["materials"]:
                 self._add_mat_vars(m["cost"], m["qty"])
@@ -1110,12 +1190,14 @@ class Card(CardBase):
         if any(c.get().strip() for c, _ in self.mats):
             return True
         typed = {"profit": self.target, "percent": self.pct}.get(self.mode.get(), self.sale)
-        return bool(typed.get().strip())
+        return bool(typed.get().strip()) or bool(self.market.get().strip())
 
     def on_zoom(self):
         """Called when the whole UI is scaled: refresh the things that don't scale by themselves."""
         z = self.app.zoom
         self.breakdown.config(wraplength=int(300 * self.app.scale * z))
+        for w in (self.chip, self.crafts_lbl):
+            w.config(wraplength=int(300 * self.app.scale * z))
         img = self.app.tier_images.get(self.tier_key) if self.tier_key else None
         self.reward_icon.config(image=img or self.app.blank_icon)
 
@@ -1186,6 +1268,11 @@ class Card(CardBase):
                                       (self.pct_entry, self.pct_lbl, "Preferred profit %", "percent")):
             entry.config(state="normal" if mode == own else "readonly")
             lbl.config(text=name + ("" if mode == own else "  (auto)"))
+        self.round_box.config(state="readonly" if mode != "price" else "disabled")
+        if mode == "price":
+            self.use_btn.grid_remove()
+        else:
+            self.use_btn.grid()
         self._update_title()
 
         if self._validate():
@@ -1193,12 +1280,18 @@ class Card(CardBase):
             self._set_summary("")
             self.total.set("—")
             self.breakdown.config(text="")
-            for lbl in (self.be_lbl, self.tax_lbl, self.net_lbl, self.roi_lbl):
-                lbl.config(text="—")
+            for lbl in (self.be_lbl, self.tax_lbl, self.net_lbl, self.roi_lbl, self.mprofit_lbl,
+                        *self.tiles.values()):
+                lbl.config(text="—", foreground=self.app.default_fg)
+            self.tile_pct.config(text="")
+            self.chip.config(text="")
+            self.crafts_lbl.config(text="")
+            self.use_btn.state(["disabled"])
             self.profit_lbl.config(text="Check red fields", foreground=RED)
             self._set_reward(NEUTRAL_TIER)
             return
 
+        self.use_btn.state(["!disabled"])
         r = compute(st)
         self.last = r
         self._updating = True
@@ -1230,6 +1323,31 @@ class Card(CardBase):
         self.profit_lbl.config(text=("+" if p > 0.005 else "") + fmt_num(p), foreground=color)
         roi = r["roi"]
         self.roi_lbl.config(text="—" if roi is None else f"{roi:,.2f}%")
+        t = self.tiles
+        t["price"].config(text=short_num(r["sale"]))
+        t["fee"].config(text=short_num(r["tax"]))
+        t["cost"].config(text=short_num(r["cost"]))
+        t["profit"].config(text=("+" if p > 0.005 else "") + short_num(p), foreground=color)
+        self.tile_pct.config(text="" if roi is None else f"{roi:,.1f}% return", foreground=color)
+        mp, md = r["market_profit"], r["market_diff"]
+        self.mprofit_lbl.config(text="—" if mp is None else ("+" if mp > 0.005 else "") + fmt_num(mp),
+                                foreground=self.app.default_fg if mp is None else
+                                GREEN if mp > 0.005 else RED if mp < -0.005 else self.app.default_fg)
+        if md is None:
+            self.chip.config(text="")
+        elif md > 0.5:
+            self.chip.config(text=f"\u26a0 {md:,.0f}% above market \u2013 may sell slowly", foreground=RED)
+        elif md < -0.5:
+            self.chip.config(text=f"{-md:,.0f}% under market \u2013 you could ask for more", foreground=GREEN)
+        else:
+            self.chip.config(text="At market price", foreground=self.app.default_fg)
+        if r["qty"] > 1:
+            q = r["qty"]
+            self.crafts_lbl.config(text=f"For {q} crafts: cost {fmt_num(r['total_cost'])}  \u00b7  tax "
+                                        f"{fmt_num(r['total_tax'])}  \u00b7  profit "
+                                        f"{'+' if r['total_profit'] > 0.005 else ''}{fmt_num(r['total_profit'])}")
+        else:
+            self.crafts_lbl.config(text="")
         self._set_reward(tier_for(roi))
         self._set_summary("" if r["cost"] <= 0 else
                           f"{'+' if p > 0.005 else ''}{short_num(p)}" + ("" if roi is None else f"  ({roi:,.1f}%)"))
@@ -1931,7 +2049,13 @@ def export_text(state):
                       f"  Break-even sale price: {fmt_num(r['break_even'])}",
                       f"  Sale price: {fmt_num(r['sale'])}  (tax {round(r['rate'] * 100)}%: {fmt_num(r['tax'])})",
                       f"  You receive: {fmt_num(r['net'])}",
-                      f"  Profit: {fmt_num(r['profit'])}{pct}", ""]
+                      f"  Profit: {fmt_num(r['profit'])}{pct}"]
+            if r["market_profit"] is not None:
+                lines.append(f"  Market price {fmt_num(r['market'])}: profit {fmt_num(r['market_profit'])}")
+            if r["qty"] > 1:
+                lines.append(f"  For {r['qty']} crafts: cost {fmt_num(r['total_cost'])}, "
+                             f"profit {fmt_num(r['total_profit'])}")
+            lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -1940,7 +2064,8 @@ def export_csv(state):
     out = io.StringIO()
     w = csv.writer(out, lineterminator="\n")
     w.writerow(["Item", "Name", "Total cost", "Break-even price", "Sale price", "Tax rate", "Tax paid",
-                "You receive", "Profit", "Profit %"])
+                "You receive", "Profit", "Profit %", "Crafts", "Total cost (all crafts)",
+                "Total profit (all crafts)", "Market price", "Profit at market"])
     scrolls = []
     for i, raw in enumerate(state.get("items", []), 1):
         it = sanitize_card(raw)
@@ -1952,7 +2077,9 @@ def export_csv(state):
             continue
         w.writerow([i, it["nickname"].strip(), round(r["cost"], 2), r["break_even"], round(r["sale"], 2),
                     f"{round(r['rate'] * 100)}%", round(r["tax"], 2), round(r["net"], 2), round(r["profit"], 2),
-                    "" if r["roi"] is None else round(r["roi"], 2)])
+                    "" if r["roi"] is None else round(r["roi"], 2), r["qty"], round(r["total_cost"], 2),
+                    round(r["total_profit"], 2), r["market"] or "",
+                    "" if r["market_profit"] is None else round(r["market_profit"], 2)])
     for i, it in scrolls:
         rep_ = scroll_report(it)
         if "error" in rep_:
@@ -2439,18 +2566,20 @@ class App:
         self.commit_now()
 
     def _update_totals(self):
-        n, cost, profit = 0, 0.0, 0.0
+        n, crafts, cost, profit = 0, 0, 0.0, 0.0
         for c in self.cards:
             r = getattr(c, "last", None)
             if r and r["cost"] > 0:
                 n += 1
-                cost += r["cost"]
-                profit += r["profit"]
+                crafts += r["qty"]
+                cost += r["total_cost"]
+                profit += r["total_profit"]
         if not n:
             self.totals.config(text="")
             return
         pct = f"  ({profit / cost * 100:,.1f}%)" if cost > 0 else ""
-        self.totals.config(text=f"{n} item{'' if n == 1 else 's'}  \u00b7  Total cost {fmt_money(cost)}"
+        many = f" ({crafts} crafts)" if crafts != n else ""
+        self.totals.config(text=f"{n} item{'' if n == 1 else 's'}{many}  \u00b7  Total cost {fmt_money(cost)}"
                                 f"  \u00b7  Total profit {'+' if profit > 0.005 else ''}{fmt_money(profit)}{pct}")
 
     # ---- changelog and guide ---------------------------------------------- #
@@ -3335,6 +3464,10 @@ def selftest(out_path):
         assert updater.asset_name("1.2.3", "Windows-x64") == "MSCW-Merchant-Simulator-v1.2.3-Windows-x64.exe"
         assert updater.platform_tag() is not None, "no release build is named for this system"
         real_messagebox, real_open, real_can = messagebox, webbrowser.open, updater.can_self_update
+        real_version = globals()["__version__"]
+        if updater.parse_version(real_version) is None:       # a test build ("1.8.0-test.1") never updates itself
+            assert not updater.is_newer("999.0.0", real_version)
+            globals()["__version__"] = "1.0.0"                 # ...so pretend to be a normal version for these checks
         said, opened = [], []
         webbrowser.open = lambda url, *a, **k: opened.append(url)
         answer = {"ync": False}
@@ -3368,6 +3501,7 @@ def selftest(out_path):
             assert said and said[-1][0] == "ync"
         finally:
             messagebox, webbrowser.open, updater.can_self_update = real_messagebox, real_open, real_can
+            globals()["__version__"] = real_version
             save_settings({"skip_version": ""})
 
         # --- scroll simulator card
@@ -3475,6 +3609,30 @@ def selftest(out_path):
             assert pc.be_lbl.cget("text") == "1,237,114", "break-even was " + pc.be_lbl.cget("text")
             app.commit_now()
             assert "Total cost" in app.totals.cget("text"), "totals line is empty"
+
+            # --- 1.8 test features: crafts, market price, rounding, headline strip ---
+            r0 = compute({"base": "1000", "tax": "3%", "mode": "price", "sale_price": "2000", "qty": "5", "market": "1600"})
+            assert r0["qty"] == 5 and abs(r0["total_profit"] - 5 * r0["profit"]) < 1e-6
+            assert r0["market_diff"] > 24.9 and abs(r0["market_profit"] - (1600 * 0.97 - 1000)) < 1e-6
+            assert compute({"base": "1000", "tax": "3%", "mode": "percent", "target_pct": "10", "round": "100"})["sale"] % 100 == 0
+            assert compute({"base": "1000", "tax": "3%", "mode": "percent", "target_pct": "10"})["sale"] == 1135
+            assert compute({"base": "1000", "tax": "3%", "mode": "percent", "target_pct": "10", "round": "1000"})["sale"] == 2000
+            assert compute({"base": "1000", "tax": "3%", "mode": "price", "sale_price": "1234", "round": "1000"})["sale"] == 1234
+            assert compute({"base": "1000", "qty": ""})["qty"] == 1
+            pc.qty.set("5"); pc.market.set("1m"); root.update()
+            assert "5 crafts" in pc.crafts_lbl.cget("text"), pc.crafts_lbl.cget("text")
+            assert "above market" in pc.chip.cget("text") or "under market" in pc.chip.cget("text") or "At market" in pc.chip.cget("text")
+            assert pc.tiles["cost"].cget("text") == "1.2m", pc.tiles["cost"].cget("text")
+            app.commit_now()
+            assert "(5 crafts)" in app.totals.cget("text") or "crafts" in app.totals.cget("text")
+            pc.mode.set("percent"); pc.pct.set("10"); pc.round_text.set("Up to 100,000".replace("100,000", "1,000")); root.update()
+            assert pc.round.get() == "1000" and pc.last["sale"] % 1000 == 0
+            pc.use_suggested(); root.update()
+            assert pc.mode.get() == "price" and pc.sale.get().replace(",", "") == str(int(pc.last["sale"]))
+            st = pc.get_state(); assert st["qty"] == "5" and st["round"] == "1000" and st["market"] == "1m"
+            pc.qty.set("1"); pc.market.set(""); root.update()
+            assert pc.crafts_lbl.cget("text") == "" and pc.chip.cget("text") == ""
+            pc.sale.set("1.5m"); root.update()
 
             n = len(app.cards)
             app.duplicate_card(pc)

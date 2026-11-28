@@ -9,6 +9,24 @@ must have an entry here **before** its tag is pushed (see [RELEASING.md](RELEASI
 
 ## [Unreleased]
 
+## [1.8.0-test.1] - 2026-11-27
+
+Test build from the `test-card-upgrades` branch (published as a pre-release, never offered by the updater).
+
+### Added
+- **Crafts (how many)** box on item cards: shows total cost, tax and profit for that many crafts,
+  and the totals line counts them.
+- **Market price now (optional)**: shows your profit if you sell at the market price, plus a chip such
+  as "16% above market - may sell slowly" or "x% under market".
+- **Round price up** (to 100 / 1,000 / 10,000) for prices worked out from a profit or profit %, and a
+  **Use this price as my sale price** button that switches the card to a typed sale price.
+- **Headline strip** at the top of Results: Your price - Shop fee - Your cost = Profit, with the return %.
+- Export includes crafts and market price.
+
+### Security
+- The updater only accepts official (non-pre-release, non-draft) releases of this repository and only
+  downloads from this repository's release URLs.
+
 ## [1.7.4] - 2026-11-27
 
 ### Changed

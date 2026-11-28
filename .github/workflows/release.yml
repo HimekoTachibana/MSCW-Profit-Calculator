@@ -8,7 +8,9 @@ name: Build & Release
 #                                           Artifacts. Nothing is tagged or published.
 #   * "Publish a GitHub release" ticked   -> also creates tag v<__version__> on main and publishes
 #                                           the release, using that version's CHANGELOG.md section
-#                                           as the release notes.
+#                                           as the release notes. Only from main.
+#   * A TEST version (e.g. 1.8.0-test.1) can be published from any branch: it becomes a
+#     "Pre-release" that the app's self-update never offers.
 # Pushing a tag like v1.0.0 from the command line works too.
 on:
   push:
@@ -46,9 +48,12 @@ jobs:
             TAG="$GITHUB_REF_NAME"; PUBLISH=true
           elif [ "$RELEASE_INPUT" = "true" ]; then
             TAG="v$VERSION"; PUBLISH=true
-            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
-              echo "::error::Publish a release from the main branch (this run used $GITHUB_REF)."; exit 1
-            fi
+            case "$VERSION" in
+              *-*) echo "Test version $VERSION: will be published as a PRE-RELEASE (never offered by the in-app updater)." ;;
+              *) if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+                   echo "::error::A normal release can only be published from the main branch (this run used $GITHUB_REF). Test versions like 1.8.0-test.1 can be published from any branch."; exit 1
+                 fi ;;
+            esac
             if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
               echo "::error::Tag $TAG already exists. Bump __version__ in mscw_merchant_simulator.py and add a CHANGELOG.md entry first."; exit 1
             fi
@@ -179,7 +184,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$TAG" release-files/* \
+          EXTRA=""
+          case "$TAG" in *-*) EXTRA="--prerelease --latest=false" ;; esac
+          gh release create "$TAG" release-files/* $EXTRA \
             --target "$GITHUB_SHA" \
             --title "MSCW Merchant Simulator $TAG" \
             --notes-file release_notes.md

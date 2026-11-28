@@ -107,11 +107,15 @@ def fetch_latest(timeout=8, opener=None):
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:                       # offline, rate limited, no releases, ...
         raise UpdateError(f"Could not reach GitHub ({exc}).") from exc
+    # Only official releases of THIS repository are ever offered: never drafts or test
+    # pre-releases (those come from test branches), and never a download from anywhere else.
+    if data.get("prerelease") or data.get("draft"):
+        raise UpdateError("The newest release is a test build, so it is not offered as an update.")
     tag = str(data.get("tag_name", ""))
     if parse_version(tag) is None:
         raise UpdateError(f"The latest release has an unexpected version name: {tag!r}.")
     assets = {a["name"]: a["browser_download_url"] for a in data.get("assets", [])
-              if a.get("name") and a.get("browser_download_url")}
+              if a.get("name") and str(a.get("browser_download_url", "")).startswith(DOWNLOAD_PREFIX)}
     return {"version": tag.lstrip("v"), "tag": tag, "notes": data.get("body") or "",
             "page": data.get("html_url") or RELEASES_PAGE, "assets": assets}
 
